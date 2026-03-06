@@ -17,6 +17,10 @@ def main():
     def new_route():
         return {"message": "New route"}
 
+    @app.get("/another")
+    def another_route():
+        return {"message": "Another route"}
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 

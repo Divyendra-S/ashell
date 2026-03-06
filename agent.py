@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import pathlib
+import shutil
 import subprocess
 import time
 
@@ -16,7 +18,10 @@ API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:gene
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("agent")
 
-SAFE_COMMANDS = {"ls", "cat", "echo", "python", "pip", "pytest", "git"}
+# --- Sandbox config ---
+WORKDIR = pathlib.Path.cwd().resolve()
+SRT_SETTINGS = WORKDIR / "srt-settings.json"
+SRT_PATH = shutil.which("srt")
 
 # Tool definitions — these tell Gemini what functions it can call
 TOOLS = [
@@ -77,35 +82,77 @@ TOOLS = [
 ]
 
 
-def is_safe_command(cmd: str) -> bool:
-    first_word = cmd.strip().split()[0]
-    return first_word in SAFE_COMMANDS
+def safe_path(path: str) -> str | None:
+    """Resolve path and ensure it stays inside WORKDIR.
+
+    This is our Python-level check (Layer 1). Even without srt,
+    this prevents ../../../etc/passwd style escapes.
+    """
+    resolved = (WORKDIR / path).resolve()
+    if not str(resolved).startswith(str(WORKDIR)):
+        return None
+    return str(resolved)
+
+
+def confirm_action(tool_name: str, args: dict) -> bool:
+    """Ask user before executing. Auto-approve reads (Layer 3).
+
+    Like Claude Code's tiered permission system:
+    - Tier 1: read_file auto-approved
+    - Tier 2: everything else needs user approval
+    """
+    if tool_name == "read_file":
+        return True
+    print(f"\n  Tool: {tool_name}")
+    print(f"  Args: {json.dumps(args, indent=2)}")
+    answer = input("  Approve? [y/n]: ").strip().lower()
+    return answer == "y"
 
 
 def run_shell(command: str) -> str:
-    if not is_safe_command(command):
-        log.warning(f"BLOCKED: '{command}' not in allowlist")
-        return f"BLOCKED: command '{command}' not in allowlist"
+    """Run a shell command inside the srt sandbox (Layer 2).
+
+    Instead of trying to parse commands for safety (weak allowlist),
+    we let srt enforce OS-level restrictions:
+    - Filesystem: can only write in project dir
+    - Network: blocked entirely
+    - Sensitive files (~/.ssh, ~/.aws): blocked from reading
+    """
     try:
-        result = subprocess.run(
-            command, shell=True, capture_output=True, text=True, timeout=15
-        )
+        if SRT_PATH:
+            # OS-level sandboxing via Anthropic's sandbox-runtime
+            result = subprocess.run(
+                [SRT_PATH, "--settings", str(SRT_SETTINGS), "bash", "-c", command],
+                capture_output=True, text=True, timeout=30,
+            )
+        else:
+            # Fallback: run without sandbox (log a warning)
+            log.warning("srt not found — running command WITHOUT sandbox")
+            result = subprocess.run(
+                command, shell=True, capture_output=True, text=True, timeout=30,
+            )
         return (result.stdout + result.stderr)[:4000]
     except subprocess.TimeoutExpired:
-        return "ERROR: command timed out after 15s"
+        return "ERROR: command timed out after 30s"
 
 
 def read_file(path: str) -> str:
+    resolved = safe_path(path)
+    if resolved is None:
+        return f"BLOCKED: '{path}' is outside the project directory"
     try:
-        with open(path) as f:
+        with open(resolved) as f:
             return f.read()
     except FileNotFoundError:
         return f"ERROR: file '{path}' not found"
 
 
 def edit_file(path: str, old_string: str, new_string: str) -> str:
+    resolved = safe_path(path)
+    if resolved is None:
+        return f"BLOCKED: '{path}' is outside the project directory"
     try:
-        content = open(path).read()
+        content = open(resolved).read()
     except FileNotFoundError:
         return f"ERROR: file '{path}' not found"
 
@@ -117,15 +164,18 @@ def edit_file(path: str, old_string: str, new_string: str) -> str:
         return f"ERROR: old_string appears {count} times in '{path}'. Make it more specific."
 
     new_content = content.replace(old_string, new_string, 1)
-    with open(path, "w") as f:
+    with open(resolved, "w") as f:
         f.write(new_content)
     return f"OK: edited '{path}'"
 
 
 def create_file(path: str, content: str) -> str:
-    if os.path.exists(path):
+    resolved = safe_path(path)
+    if resolved is None:
+        return f"BLOCKED: '{path}' is outside the project directory"
+    if os.path.exists(resolved):
         return f"ERROR: file '{path}' already exists. Use edit_file instead."
-    with open(path, "w") as f:
+    with open(resolved, "w") as f:
         f.write(content)
     return f"OK: created '{path}'"
 
@@ -198,7 +248,10 @@ def get_response(contents: list[dict]) -> str:
             args = fc["args"]
             log.info(f"Tool: {name}({args})")
 
-            if name == "shell":
+            # Layer 3: User confirmation before executing
+            if not confirm_action(name, args):
+                result = "BLOCKED: user denied this action"
+            elif name == "shell":
                 result = run_shell(args.get("command", ""))
             elif name == "read_file":
                 result = read_file(args.get("path", ""))
@@ -225,7 +278,12 @@ def main():
     # This is ALL the state. No SDK objects, no hidden magic.
     contents = []
 
-    print("Agent ready. Type 'exit' to quit.\n")
+    if SRT_PATH:
+        print(f"Agent ready. Sandbox: ON (srt at {SRT_PATH})")
+    else:
+        print("Agent ready. Sandbox: OFF (install @anthropic-ai/sandbox-runtime)")
+    print(f"Working directory: {WORKDIR}")
+    print("Type 'exit' to quit.\n")
 
     while True:
         try:

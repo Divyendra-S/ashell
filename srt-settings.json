@@ -1,0 +1,21 @@
+{
+  "network": {
+    "allowedDomains": [],
+    "deniedDomains": [],
+    "allowLocalBinding": false
+  },
+  "filesystem": {
+    "denyRead": [
+      "~/.ssh",
+      "~/.aws",
+      "~/.gnupg",
+      "~/.config",
+      "~/.netrc",
+      "~/.npmrc",
+      "~/.docker",
+      "~/.kube"
+    ],
+    "allowWrite": ["."],
+    "denyWrite": [".env", ".git"]
+  }
+}
