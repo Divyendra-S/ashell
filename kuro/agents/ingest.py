@@ -126,14 +126,19 @@ def _execute_tool(name: str, args: dict) -> str:
 
     elif name == "scrape_url":
         from kuro.memory.scraper import scrape_url
-        result = scrape_url(args["url"])
+        try:
+            result = scrape_url(args["url"])
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
         return json.dumps(result)
 
     elif name == "save_article":
-        from kuro.memory.files import save_article as _save_article
+        from kuro.memory.files import save_article as _save_article, chunk_text
         file_path = _save_article(args["title"], args["content"], args.get("topic", "general"))
         row = store.insert_article(args.get("url", ""), args["title"], file_path)
-        return json.dumps({"file_path": file_path, "article_id": row["id"]})
+        chunks = chunk_text(args["content"])
+        store.insert_article_chunks(row["id"], chunks)
+        return json.dumps({"file_path": file_path, "article_id": row["id"], "chunks": len(chunks)})
 
     return f"Unknown tool: {name}"
 

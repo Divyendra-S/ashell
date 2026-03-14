@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("kuro.cli")
 
 QUERY_PATTERN = re.compile(
-    r"^(who|what|when|where|why|how|tell|is |are |do |does |did |can |could |would |should |has |have )",
+    r"^(who|what|when|where|why|how|tell|is |are |do |does |did |can |could |would |should |has |have |find |show |list |compare |explain |describe |give |if I |summarize |search )",
     re.IGNORECASE,
 )
 

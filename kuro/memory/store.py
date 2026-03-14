@@ -94,3 +94,62 @@ def insert_article(url: str, title: str, file_path: str) -> dict:
 def get_article_by_url(url: str) -> dict | None:
     res = supabase.table("articles").select("*").eq("url", url).execute()
     return res.data[0] if res.data else None
+
+
+def search_knowledge_unified(query: str) -> dict:
+    """Unified FTS across entities, facts, and article chunks."""
+    result = supabase.rpc("search_knowledge", {"search_query": query}).execute()
+    return result.data
+
+
+def insert_article_chunks(article_id: int, chunks: list[str]) -> list[dict]:
+    rows = [{"article_id": article_id, "chunk_index": i, "content": c}
+            for i, c in enumerate(chunks)]
+    return supabase.table("article_chunks").insert(rows).execute().data
+
+
+def list_articles() -> list[dict]:
+    result = supabase.table("articles").select("id, title, url, file_path").order("created_at", desc=True).execute()
+    return result.data
+
+
+def traverse(entity_id: int, depth: int = 1) -> dict:
+    """BFS through relations up to `depth` hops."""
+    visited_ids, edges, queue = set(), [], [entity_id]
+    for _ in range(depth):
+        next_queue = []
+        for eid in queue:
+            if eid in visited_ids:
+                continue
+            visited_ids.add(eid)
+            rels = get_relations_for_entity(eid)
+            for r in rels:
+                edges.append(r)
+                other_id = r["target_id"] if r["source_id"] == eid else r["source_id"]
+                if other_id not in visited_ids:
+                    next_queue.append(other_id)
+        queue = next_queue
+    entities = []
+    for eid in visited_ids:
+        row = supabase.table("entities").select("id, name, entity_type, summary").eq("id", eid).execute()
+        if row.data:
+            entities.append(row.data[0])
+    return {"entities": entities, "relations": edges}
+
+
+def get_relations_for_entity_enriched(entity_id: int) -> list[dict]:
+    """Relations with entity names resolved."""
+    relations = get_relations_for_entity(entity_id)
+    entity_ids = set()
+    for r in relations:
+        entity_ids.add(r["source_id"])
+        entity_ids.add(r["target_id"])
+    names = {}
+    for eid in entity_ids:
+        row = supabase.table("entities").select("id, name").eq("id", eid).execute()
+        if row.data:
+            names[row.data[0]["id"]] = row.data[0]["name"]
+    for r in relations:
+        r["source_name"] = names.get(r["source_id"], "unknown")
+        r["target_name"] = names.get(r["target_id"], "unknown")
+    return relations
