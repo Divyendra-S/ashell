@@ -23,6 +23,13 @@ class Relation(BaseModel):
     context: str | None = None
 
 
+class Article(BaseModel):
+    id: int | None = None
+    url: str | None = None
+    title: str
+    file_path: str
+
+
 class ChatRequest(BaseModel):
     message: str
 

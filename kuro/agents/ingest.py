@@ -9,7 +9,9 @@ log = logging.getLogger("kuro.ingest")
 SYSTEM_PROMPT = (
     "You are a knowledge extraction agent. Extract entities, facts, and relations "
     "from user input. Use the provided tools to store them. After storing, confirm "
-    "what you saved in a brief summary."
+    "what you saved in a brief summary. "
+    "If the user provides a URL, use scrape_url to fetch it, then save_article to "
+    "store it, then extract key concepts as entities and facts using the existing tools."
 )
 
 TOOLS = [
@@ -58,6 +60,31 @@ TOOLS = [
                     "required": ["source_name", "relation_type", "target_name"],
                 },
             },
+            {
+                "name": "scrape_url",
+                "description": "Fetch a URL and convert its content to markdown. Use this when the user provides a URL to ingest.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "The URL to scrape"},
+                    },
+                    "required": ["url"],
+                },
+            },
+            {
+                "name": "save_article",
+                "description": "Save a scraped article to disk and store its metadata. Use after scrape_url.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Article title"},
+                        "content": {"type": "string", "description": "Article content in markdown"},
+                        "topic": {"type": "string", "description": "Topic category for filing (e.g. ai, web, science)"},
+                        "url": {"type": "string", "description": "Source URL of the article"},
+                    },
+                    "required": ["title", "content"],
+                },
+            },
         ]
     }
 ]
@@ -96,6 +123,17 @@ def _execute_tool(name: str, args: dict) -> str:
             args.get("context"),
         )
         return json.dumps({"status": "ok", "relation": result}, default=str)
+
+    elif name == "scrape_url":
+        from kuro.memory.scraper import scrape_url
+        result = scrape_url(args["url"])
+        return json.dumps(result)
+
+    elif name == "save_article":
+        from kuro.memory.files import save_article as _save_article
+        file_path = _save_article(args["title"], args["content"], args.get("topic", "general"))
+        row = store.insert_article(args.get("url", ""), args["title"], file_path)
+        return json.dumps({"file_path": file_path, "article_id": row["id"]})
 
     return f"Unknown tool: {name}"
 

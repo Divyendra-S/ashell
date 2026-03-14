@@ -47,16 +47,22 @@ def insert_relation(source_id: int, relation_type: str, target_id: int, context:
     return result.data[0]
 
 
+def _to_tsquery(query: str) -> str:
+    """Convert natural language query to tsquery format (join words with &)."""
+    words = query.strip().split()
+    return " & ".join(words)
+
+
 def search_entities(query: str) -> list[dict]:
     result = supabase.table("entities").select("*").text_search(
-        "search_vector", query, options={"config": "english"}
+        "search_vector", _to_tsquery(query), options={"config": "english", "type": "plain"}
     ).execute()
     return result.data
 
 
 def search_facts(query: str) -> list[dict]:
     result = supabase.table("facts").select("*").text_search(
-        "search_vector", query, options={"config": "english"}
+        "search_vector", _to_tsquery(query), options={"config": "english", "type": "plain"}
     ).execute()
     return result.data
 
@@ -77,3 +83,14 @@ def get_relations_for_entity(entity_id: int) -> list[dict]:
     seen = {r["id"] for r in r1.data}
     combined = r1.data + [r for r in r2.data if r["id"] not in seen]
     return combined
+
+
+def insert_article(url: str, title: str, file_path: str) -> dict:
+    return supabase.table("articles").insert({
+        "url": url, "title": title, "file_path": file_path
+    }).execute().data[0]
+
+
+def get_article_by_url(url: str) -> dict | None:
+    res = supabase.table("articles").select("*").eq("url", url).execute()
+    return res.data[0] if res.data else None
