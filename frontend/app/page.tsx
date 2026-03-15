@@ -9,6 +9,7 @@ interface Message {
   role: "user" | "kuro";
   text: string;
   mode?: "ingest" | "query";
+  skill?: string;
 }
 
 const suggestions = [
@@ -51,15 +52,24 @@ export default function Home() {
     const text = input.trim();
     if (!text || loading) return;
 
+    // Detect slash command
+    let skill: string | undefined;
+    let cleanText = text;
+    const slashMatch = text.match(/^\/(\S+)\s*(.*)/s);
+    if (slashMatch) {
+      skill = slashMatch[1];
+      cleanText = slashMatch[2]?.trim() || text;
+    }
+
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", text }]);
+    setMessages((prev) => [...prev, { role: "user", text, skill }]);
     setLoading(true);
 
     try {
-      const res: ChatResponse = await sendMessage(text, userId!);
+      const res: ChatResponse = await sendMessage(text, userId!, skill);
       setMessages((prev) => [
         ...prev,
-        { role: "kuro", text: res.response, mode: res.mode },
+        { role: "kuro", text: res.response, mode: res.mode, skill: res.skill ?? undefined },
       ]);
     } catch (err) {
       setMessages((prev) => [
@@ -163,6 +173,11 @@ export default function Home() {
                           }`}
                         >
                           {msg.mode}
+                        </span>
+                      )}
+                      {msg.skill && (
+                        <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
+                          /{msg.skill}
                         </span>
                       )}
                     </div>

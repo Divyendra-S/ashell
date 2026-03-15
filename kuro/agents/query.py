@@ -4,6 +4,7 @@ import logging
 from kuro.core.llm import run_agent_loop
 from kuro.core.retrieval import rewrite_query, hybrid_retrieve, rrf_merge
 from kuro.memory import store
+from kuro.skills import get_skill, get_skill_index
 
 log = logging.getLogger("kuro.query")
 
@@ -259,7 +260,7 @@ def _format_context(results: list[dict]) -> str:
     return "\n\n".join(sections)
 
 
-def query(user_text: str, history: list[dict] | None = None, user_id: str = "default") -> str:
+def query(user_text: str, history: list[dict] | None = None, user_id: str = "default", skill: str | None = None) -> str:
     queries = rewrite_query(user_text)
     log.info(f"Rewritten queries: {queries}")
     raw = hybrid_retrieve(queries, user_id=user_id)
@@ -269,6 +270,15 @@ def query(user_text: str, history: list[dict] | None = None, user_id: str = "def
     memories = store.get_user_memories(user_id)
     user_memory = _format_user_memory(memories)
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context, user_memory=user_memory)
+
+    # Append skill index for auto-detection
+    system_prompt += "\n\n" + get_skill_index()
+
+    # Append active skill body if explicitly activated
+    if skill:
+        skill_data = get_skill(skill)
+        if skill_data:
+            system_prompt += f"\n\n## Active Skill: /{skill_data['name']}\n{skill_data['body']}"
 
     contents = history or []
     contents.append({"role": "user", "parts": [{"text": user_text}]})

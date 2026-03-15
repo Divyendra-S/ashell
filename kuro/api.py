@@ -1,4 +1,5 @@
 import logging
+import re
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,8 +7,9 @@ from pydantic import BaseModel
 
 from kuro.agents.ingest import ingest
 from kuro.agents.query import query
-from kuro.cli import classify
+from kuro.cli import classify, SLASH_CMD_PATTERN
 from kuro.memory import store
+from kuro.skills import load_skills, get_skill
 
 logging.basicConfig(level=logging.INFO)
 
@@ -25,6 +27,7 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     user_id: str = "default"
+    skill: str | None = None
 
 
 class IngestRequest(BaseModel):
@@ -44,12 +47,35 @@ def health():
 
 @app.post("/api/chat")
 def chat(req: ChatRequest):
-    mode = classify(req.message)
-    if mode == "query":
-        response = query(req.message, user_id=req.user_id)
+    skill = req.skill
+    message = req.message
+
+    if skill:
+        # Explicit skill from frontend — strip slash prefix if present
+        slash = SLASH_CMD_PATTERN.match(message)
+        if slash:
+            message = slash.group(2).strip() or message
+        skill_data = get_skill(skill)
+        mode = skill_data.get("mode", "query") if skill_data else "query"
     else:
-        response = ingest(req.message, user_id=req.user_id)
-    return {"response": response, "mode": mode}
+        mode, skill = classify(message)
+        if skill:
+            slash = SLASH_CMD_PATTERN.match(message)
+            if slash:
+                message = slash.group(2).strip() or message
+
+    if mode == "query":
+        response = query(message, user_id=req.user_id, skill=skill)
+    else:
+        # For ingest-url skill, pass instructions to ingest agent
+        skill_instructions = None
+        if skill:
+            skill_data = get_skill(skill)
+            if skill_data:
+                skill_instructions = f"## Active Skill: /{skill_data['name']}\n{skill_data['body']}"
+        response = ingest(message, user_id=req.user_id, skill_instructions=skill_instructions)
+
+    return {"response": response, "mode": mode, "skill": skill}
 
 
 @app.post("/api/ingest")
@@ -62,6 +88,17 @@ def ingest_endpoint(req: IngestRequest):
 def query_endpoint(req: QueryRequest):
     answer = query(req.question, user_id=req.user_id)
     return {"answer": answer}
+
+
+@app.get("/api/skills")
+def list_skills_endpoint():
+    skills = load_skills()
+    return {
+        "skills": [
+            {"name": s["name"], "description": s["description"], "triggers": s["triggers"]}
+            for s in skills.values()
+        ]
+    }
 
 
 @app.get("/api/entities")

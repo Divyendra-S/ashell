@@ -153,8 +153,11 @@ def _make_tool_executor(user_id: str):
     return execute_tool
 
 
-def ingest(user_text: str, history: list[dict] | None = None, user_id: str = "default") -> str:
+def ingest(user_text: str, history: list[dict] | None = None, user_id: str = "default", skill_instructions: str | None = None) -> str:
+    system = SYSTEM_PROMPT
+    if skill_instructions:
+        system += "\n\n" + skill_instructions
     contents = history or []
     contents.append({"role": "user", "parts": [{"text": user_text}]})
     tool_executor = _make_tool_executor(user_id)
-    return run_agent_loop(contents, TOOLS, tool_executor, system_instruction=SYSTEM_PROMPT)
+    return run_agent_loop(contents, TOOLS, tool_executor, system_instruction=system)
