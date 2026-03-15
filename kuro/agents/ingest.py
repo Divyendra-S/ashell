@@ -90,65 +90,71 @@ TOOLS = [
 ]
 
 
-def _resolve_entity(name: str) -> dict:
+def _resolve_entity(name: str, user_id: str = "default") -> dict:
     """Get entity by name, auto-creating if it doesn't exist."""
-    entity = store.get_entity_by_name(name)
+    entity = store.get_entity_by_name(name, user_id=user_id)
     if entity:
         return entity
     log.info(f"Auto-creating entity: {name}")
-    return store.upsert_entity(name, "topic")
+    return store.upsert_entity(name, "topic", user_id=user_id)
 
 
-def _execute_tool(name: str, args: dict) -> str:
-    if name == "store_entity":
-        result = store.upsert_entity(
-            args["name"],
-            args["entity_type"],
-            args.get("summary"),
-        )
-        return json.dumps({"status": "ok", "entity": result}, default=str)
+def _make_tool_executor(user_id: str):
+    def execute_tool(name: str, args: dict) -> str:
+        if name == "store_entity":
+            result = store.upsert_entity(
+                args["name"],
+                args["entity_type"],
+                args.get("summary"),
+                user_id=user_id,
+            )
+            return json.dumps({"status": "ok", "entity": result}, default=str)
 
-    elif name == "store_fact":
-        entity = _resolve_entity(args["entity_name"])
-        result = store.insert_fact(entity["id"], args["content"])
-        return json.dumps({"status": "ok", "fact": result}, default=str)
+        elif name == "store_fact":
+            entity = _resolve_entity(args["entity_name"], user_id=user_id)
+            result = store.insert_fact(entity["id"], args["content"], user_id=user_id)
+            return json.dumps({"status": "ok", "fact": result}, default=str)
 
-    elif name == "store_relation":
-        source = _resolve_entity(args["source_name"])
-        target = _resolve_entity(args["target_name"])
-        result = store.insert_relation(
-            source["id"],
-            args["relation_type"],
-            target["id"],
-            args.get("context"),
-        )
-        return json.dumps({"status": "ok", "relation": result}, default=str)
+        elif name == "store_relation":
+            source = _resolve_entity(args["source_name"], user_id=user_id)
+            target = _resolve_entity(args["target_name"], user_id=user_id)
+            result = store.insert_relation(
+                source["id"],
+                args["relation_type"],
+                target["id"],
+                args.get("context"),
+                user_id=user_id,
+            )
+            return json.dumps({"status": "ok", "relation": result}, default=str)
 
-    elif name == "scrape_url":
-        from kuro.memory.scraper import scrape_url
-        try:
-            result = scrape_url(args["url"])
-        except ValueError as e:
-            return json.dumps({"error": str(e)})
-        return json.dumps(result)
+        elif name == "scrape_url":
+            from kuro.memory.scraper import scrape_url
+            try:
+                result = scrape_url(args["url"])
+            except ValueError as e:
+                return json.dumps({"error": str(e)})
+            return json.dumps(result)
 
-    elif name == "save_article":
-        from kuro.memory.files import save_article as _save_article, chunk_text
-        from kuro.core.llm import embed_texts
-        file_path = _save_article(args["title"], args["content"], args.get("topic", "general"))
-        row = store.insert_article(args.get("url", ""), args["title"], file_path)
-        chunks = chunk_text(args["content"])
-        chunk_rows = store.insert_article_chunks(row["id"], chunks)
-        embeddings = embed_texts(chunks)
-        for chunk_row, emb in zip(chunk_rows, embeddings):
-            store.update_chunk_embedding(chunk_row["id"], emb)
-        return json.dumps({"file_path": file_path, "article_id": row["id"],
-                            "chunks": len(chunks), "embeddings_stored": len(embeddings)})
+        elif name == "save_article":
+            from kuro.memory.files import save_article as _save_article, chunk_text
+            from kuro.core.llm import embed_texts
+            file_path = _save_article(args["title"], args["content"], args.get("topic", "general"))
+            row = store.insert_article(args.get("url", ""), args["title"], file_path, user_id=user_id)
+            chunks = chunk_text(args["content"])
+            chunk_rows = store.insert_article_chunks(row["id"], chunks, user_id=user_id)
+            embeddings = embed_texts(chunks)
+            for chunk_row, emb in zip(chunk_rows, embeddings):
+                store.update_chunk_embedding(chunk_row["id"], emb)
+            return json.dumps({"file_path": file_path, "article_id": row["id"],
+                                "chunks": len(chunks), "embeddings_stored": len(embeddings)})
 
-    return f"Unknown tool: {name}"
+        return f"Unknown tool: {name}"
+
+    return execute_tool
 
 
-def ingest(user_text: str, history: list[dict] | None = None) -> str:
+def ingest(user_text: str, history: list[dict] | None = None, user_id: str = "default") -> str:
     contents = history or []
     contents.append({"role": "user", "parts": [{"text": user_text}]})
-    return run_agent_loop(contents, TOOLS, _execute_tool, system_instruction=SYSTEM_PROMPT)
+    tool_executor = _make_tool_executor(user_id)
+    return run_agent_loop(contents, TOOLS, tool_executor, system_instruction=SYSTEM_PROMPT)

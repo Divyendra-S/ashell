@@ -24,6 +24,8 @@ def classify(text: str) -> str:
 
 def main():
     print("Kuro — Knowledge capture & retrieval")
+    user_id = input("Username (default): ").strip() or "default"
+    print(f"Logged in as: {user_id}")
     print("Type 'exit' to quit.\n")
 
     ingest_history: list[dict] = []
@@ -46,9 +48,9 @@ def main():
         start = time.time()
 
         if mode == "query":
-            response = query(user_input, history=query_history)
+            response = query(user_input, history=query_history, user_id=user_id)
         else:
-            response = ingest(user_input, history=ingest_history)
+            response = ingest(user_input, history=ingest_history, user_id=user_id)
 
         print(f"Kuro [{mode}]: {response}")
         log.info(f"Turn: {time.time() - start:.2f}s")

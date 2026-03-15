@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { sendMessage, type ChatResponse } from "../lib/api";
+import { useUser } from "../lib/user";
 
 interface Message {
   role: "user" | "kuro";
@@ -16,11 +18,19 @@ const suggestions = [
 ];
 
 export default function Home() {
+  const { userId, logout } = useUser();
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!userId) {
+      router.push("/login");
+    }
+  }, [userId, router]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -34,6 +44,8 @@ export default function Home() {
     ta.style.height = `${ta.scrollHeight}px`;
   }, [input]);
 
+  if (!userId) return null;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const text = input.trim();
@@ -44,7 +56,7 @@ export default function Home() {
     setLoading(true);
 
     try {
-      const res: ChatResponse = await sendMessage(text);
+      const res: ChatResponse = await sendMessage(text, userId!);
       setMessages((prev) => [
         ...prev,
         { role: "kuro", text: res.response, mode: res.mode },
@@ -66,14 +78,28 @@ export default function Home() {
     }
   }
 
+  function handleLogout() {
+    logout();
+    router.push("/login");
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-surface-0 text-text-primary">
       {/* Header */}
       <header className="border-b border-surface-2 px-6 py-4">
-        <div className="mx-auto max-w-3xl">
+        <div className="mx-auto flex max-w-3xl items-center justify-between">
           <h1 className="text-xs font-semibold uppercase tracking-[0.2em] text-text-secondary">
             Kuro
           </h1>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-text-tertiary">{userId}</span>
+            <button
+              onClick={handleLogout}
+              className="rounded-lg border border-surface-3 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:border-accent/40 hover:text-text-primary"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </header>
 
@@ -119,7 +145,7 @@ export default function Home() {
                         : "bg-accent/15 text-accent"
                     }`}
                   >
-                    {msg.role === "user" ? "Y" : "K"}
+                    {msg.role === "user" ? userId[0].toUpperCase() : "K"}
                   </div>
 
                   <div className="min-w-0 flex-1">

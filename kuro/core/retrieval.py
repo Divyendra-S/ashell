@@ -33,13 +33,14 @@ def hybrid_retrieve(
     queries: list[str],
     vec_threshold: float = 0.3,
     vec_limit: int = 10,
+    user_id: str = "default",
 ) -> list[dict]:
     embeddings = embed_texts(queries)
     results = []
 
     for rank_offset, query in enumerate(queries):
         # FTS
-        fts_data = store.search_knowledge_unified(query)
+        fts_data = store.search_knowledge_unified(query, user_id=user_id)
         if isinstance(fts_data, dict):
             entities = fts_data.get("entities", [])
             facts = fts_data.get("facts", [])
@@ -97,7 +98,7 @@ def hybrid_retrieve(
 
         # Vector search
         embedding = embeddings[rank_offset]
-        vec_results = store.semantic_search_chunks(embedding, vec_threshold, vec_limit)
+        vec_results = store.semantic_search_chunks(embedding, vec_threshold, vec_limit, user_id=user_id)
 
         if vec_results:
             article_ids = list({r["article_id"] for r in vec_results if r.get("article_id")})
