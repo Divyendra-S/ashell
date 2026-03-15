@@ -2,39 +2,28 @@ import json
 import logging
 
 from kuro.core.llm import run_agent_loop
+from kuro.core.retrieval import rewrite_query, hybrid_retrieve, rrf_merge
 from kuro.memory import store
 
 log = logging.getLogger("kuro.query")
 
-SYSTEM_PROMPT = (
-    "You are a knowledge retrieval agent with a knowledge base of entities, facts, "
-    "relations, and saved articles.\n\n"
-    "Strategy — progressive disclosure:\n"
-    "1. Start broad: search_knowledge to find entities, facts, and article passages in one call.\n"
-    "2. Drill down: get_facts_for_entity or get_relations_for_entity for details. "
-    "   traverse_relations for multi-hop connections. grep_articles for exact phrase matches.\n"
-    "3. Go deep: read_article to load full article content when you need more context.\n\n"
-    "4. Semantic search: Use semantic_search when keyword search returns poor/no results or when "
-    "the query uses different words than the source material. It matches by meaning, not keywords.\n\n"
-    "Use list_articles for an overview of saved articles. "
-    "Follow leads — search results point to entities or articles worth exploring. "
+SYSTEM_PROMPT_TEMPLATE = (
+    "You are a knowledge retrieval agent. Relevant context from the knowledge base "
+    "has been retrieved for you below.\n\n"
+    "## Retrieved Context\n{context}\n\n"
+    "## Available Tools\n"
+    "If the retrieved context is insufficient, you can use these tools to explore further:\n"
+    "- get_facts_for_entity / get_relations_for_entity: Drill into specific entities\n"
+    "- traverse_relations: Multi-hop graph exploration\n"
+    "- grep_articles: Exact phrase search across article files\n"
+    "- read_article: Load full article when you need more than a chunk\n"
+    "- list_articles: Overview of all saved articles\n\n"
     "Cite your sources. If nothing is found, say so."
 )
 
 TOOLS = [
     {
         "functionDeclarations": [
-            {
-                "name": "search_knowledge",
-                "description": "Unified full-text search across entities, facts, and article chunks. Returns results grouped by type.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query"},
-                    },
-                    "required": ["query"],
-                },
-            },
             {
                 "name": "get_facts_for_entity",
                 "description": "Get all facts stored about a specific entity.",
@@ -100,32 +89,13 @@ TOOLS = [
                     "properties": {},
                 },
             },
-            {
-                "name": "semantic_search",
-                "description": "Meaning-based search across article chunks using vector embeddings. "
-                               "Use when keyword search (search_knowledge) returns nothing or when the "
-                               "query is conceptual/paraphrased. Finds passages by meaning, not exact words.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Natural language search query"},
-                        "threshold": {"type": "number", "description": "Minimum similarity 0-1 (default 0.5)"},
-                        "max_results": {"type": "integer", "description": "Max results (default 5)"},
-                    },
-                    "required": ["query"],
-                },
-            },
         ]
     }
 ]
 
 
 def _execute_tool(name: str, args: dict) -> str:
-    if name == "search_knowledge":
-        result = store.search_knowledge_unified(args["query"])
-        return json.dumps(result, default=str)
-
-    elif name == "get_facts_for_entity":
+    if name == "get_facts_for_entity":
         entity = store.get_entity_by_name(args["entity_name"])
         if not entity:
             return json.dumps({"error": f"Entity '{args['entity_name']}' not found"})
@@ -164,22 +134,56 @@ def _execute_tool(name: str, args: dict) -> str:
         result = store.list_articles()
         return json.dumps(result, default=str)
 
-    elif name == "semantic_search":
-        from kuro.core.llm import embed_text
-        query_embedding = embed_text(args["query"])
-        threshold = args.get("threshold", 0.5)
-        limit = args.get("max_results", 5)
-        results = store.semantic_search_chunks(query_embedding, threshold, limit)
-        for r in results:
-            article = store.supabase.table("articles").select("title, url").eq("id", r["article_id"]).execute()
-            if article.data:
-                r["article_title"] = article.data[0]["title"]
-        return json.dumps(results, default=str)
-
     return f"Unknown tool: {name}"
 
 
+def _format_context(results: list[dict]) -> str:
+    if not results:
+        return "No relevant results found in the knowledge base."
+
+    entities = [r for r in results if r["type"] == "entity"]
+    facts = [r for r in results if r["type"] == "fact"]
+    chunks = [r for r in results if r["type"] == "article_chunk"]
+
+    sections = []
+
+    if entities:
+        lines = ["### Entities"]
+        for e in entities:
+            etype = e.get("entity_type", "")
+            label = f" ({etype})" if etype else ""
+            lines.append(f"- **{e.get('title', '')}**{label}: {e.get('content', '')}")
+        sections.append("\n".join(lines))
+
+    if facts:
+        lines = ["### Facts"]
+        for f in facts:
+            lines.append(f"- {f.get('content', '')}")
+        sections.append("\n".join(lines))
+
+    if chunks:
+        lines = ["### Article Passages"]
+        for c in chunks:
+            title = c.get("title") or "Untitled"
+            content = c.get("content", "")
+            # Truncate to ~300 words
+            words = content.split()
+            if len(words) > 300:
+                content = " ".join(words[:300]) + " ..."
+            lines.append(f"**[{title}]**\n{content}\n")
+        sections.append("\n".join(lines))
+
+    return "\n\n".join(sections)
+
+
 def query(user_text: str, history: list[dict] | None = None) -> str:
+    queries = rewrite_query(user_text)
+    log.info(f"Rewritten queries: {queries}")
+    raw = hybrid_retrieve(queries)
+    top = rrf_merge(raw, top_k=8)
+    context = _format_context(top)
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context)
+
     contents = history or []
     contents.append({"role": "user", "parts": [{"text": user_text}]})
-    return run_agent_loop(contents, TOOLS, _execute_tool, system_instruction=SYSTEM_PROMPT)
+    return run_agent_loop(contents, TOOLS, _execute_tool, system_instruction=system_prompt)
