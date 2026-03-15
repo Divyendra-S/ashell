@@ -8,6 +8,37 @@ from kuro.config import GEMINI_API_KEY, GEMINI_API_URL
 
 log = logging.getLogger("kuro.llm")
 
+EMBEDDING_MODEL = "gemini-embedding-2-preview"
+EMBED_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{EMBEDDING_MODEL}:embedContent"
+BATCH_EMBED_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{EMBEDDING_MODEL}:batchEmbedContents"
+EMBED_DIMENSIONS = 768
+
+
+def embed_text(text: str) -> list[float]:
+    resp = requests.post(
+        EMBED_URL,
+        headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
+        json={"content": {"parts": [{"text": text}]}, "output_dimensionality": EMBED_DIMENSIONS},
+    )
+    resp.raise_for_status()
+    return resp.json()["embedding"]["values"]
+
+
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    requests_body = [
+        {"model": f"models/{EMBEDDING_MODEL}",
+         "content": {"parts": [{"text": t}]},
+         "output_dimensionality": EMBED_DIMENSIONS}
+        for t in texts
+    ]
+    resp = requests.post(
+        BATCH_EMBED_URL,
+        headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
+        json={"requests": requests_body},
+    )
+    resp.raise_for_status()
+    return [e["values"] for e in resp.json()["embeddings"]]
+
 
 def call_gemini(contents: list[dict], tools: list[dict] | None = None, system_instruction: str | None = None) -> dict:
     body = {"contents": contents}

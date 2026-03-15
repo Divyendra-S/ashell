@@ -134,11 +134,16 @@ def _execute_tool(name: str, args: dict) -> str:
 
     elif name == "save_article":
         from kuro.memory.files import save_article as _save_article, chunk_text
+        from kuro.core.llm import embed_texts
         file_path = _save_article(args["title"], args["content"], args.get("topic", "general"))
         row = store.insert_article(args.get("url", ""), args["title"], file_path)
         chunks = chunk_text(args["content"])
-        store.insert_article_chunks(row["id"], chunks)
-        return json.dumps({"file_path": file_path, "article_id": row["id"], "chunks": len(chunks)})
+        chunk_rows = store.insert_article_chunks(row["id"], chunks)
+        embeddings = embed_texts(chunks)
+        for chunk_row, emb in zip(chunk_rows, embeddings):
+            store.update_chunk_embedding(chunk_row["id"], emb)
+        return json.dumps({"file_path": file_path, "article_id": row["id"],
+                            "chunks": len(chunks), "embeddings_stored": len(embeddings)})
 
     return f"Unknown tool: {name}"
 

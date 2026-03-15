@@ -14,6 +14,8 @@ SYSTEM_PROMPT = (
     "2. Drill down: get_facts_for_entity or get_relations_for_entity for details. "
     "   traverse_relations for multi-hop connections. grep_articles for exact phrase matches.\n"
     "3. Go deep: read_article to load full article content when you need more context.\n\n"
+    "4. Semantic search: Use semantic_search when keyword search returns poor/no results or when "
+    "the query uses different words than the source material. It matches by meaning, not keywords.\n\n"
     "Use list_articles for an overview of saved articles. "
     "Follow leads — search results point to entities or articles worth exploring. "
     "Cite your sources. If nothing is found, say so."
@@ -98,6 +100,21 @@ TOOLS = [
                     "properties": {},
                 },
             },
+            {
+                "name": "semantic_search",
+                "description": "Meaning-based search across article chunks using vector embeddings. "
+                               "Use when keyword search (search_knowledge) returns nothing or when the "
+                               "query is conceptual/paraphrased. Finds passages by meaning, not exact words.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Natural language search query"},
+                        "threshold": {"type": "number", "description": "Minimum similarity 0-1 (default 0.5)"},
+                        "max_results": {"type": "integer", "description": "Max results (default 5)"},
+                    },
+                    "required": ["query"],
+                },
+            },
         ]
     }
 ]
@@ -146,6 +163,18 @@ def _execute_tool(name: str, args: dict) -> str:
     elif name == "list_articles":
         result = store.list_articles()
         return json.dumps(result, default=str)
+
+    elif name == "semantic_search":
+        from kuro.core.llm import embed_text
+        query_embedding = embed_text(args["query"])
+        threshold = args.get("threshold", 0.5)
+        limit = args.get("max_results", 5)
+        results = store.semantic_search_chunks(query_embedding, threshold, limit)
+        for r in results:
+            article = store.supabase.table("articles").select("title, url").eq("id", r["article_id"]).execute()
+            if article.data:
+                r["article_title"] = article.data[0]["title"]
+        return json.dumps(results, default=str)
 
     return f"Unknown tool: {name}"
 

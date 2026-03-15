@@ -137,6 +137,24 @@ def traverse(entity_id: int, depth: int = 1) -> dict:
     return {"entities": entities, "relations": edges}
 
 
+def semantic_search_chunks(query_embedding: list[float], threshold: float = 0.5, limit: int = 10) -> list[dict]:
+    result = supabase.rpc("match_chunks", {
+        "query_embedding": str(query_embedding),
+        "match_threshold": threshold,
+        "match_count": limit,
+    }).execute()
+    return result.data
+
+
+def update_chunk_embedding(chunk_id: int, embedding: list[float]) -> None:
+    supabase.table("article_chunks").update({"embedding": str(embedding)}).eq("id", chunk_id).execute()
+
+
+def get_chunks_without_embeddings() -> list[dict]:
+    result = supabase.table("article_chunks").select("id, content").is_("embedding", "null").execute()
+    return result.data
+
+
 def get_relations_for_entity_enriched(entity_id: int) -> list[dict]:
     """Relations with entity names resolved."""
     relations = get_relations_for_entity(entity_id)
