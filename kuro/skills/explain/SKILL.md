@@ -50,3 +50,8 @@ Structure your explanation in layers:
 - If they seem confused, simplify
 - If they want more detail, go deeper
 - Save any new context about the user's level using `save_memory`
+
+## Gotchas
+- **Always check user memories first.** Don't default to beginner explanations — if a user memory says "backend engineer", calibrate accordingly. Wasting an expert's time with basics is worse than starting slightly too advanced.
+- **Don't explain what wasn't asked.** Stick to the requested concept. Avoid dumping everything the KB has on a topic.
+- **Analogies must match the user's domain.** A database analogy for a data scientist is great; the same analogy for a designer is unhelpful.

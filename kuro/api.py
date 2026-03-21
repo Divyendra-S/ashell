@@ -73,7 +73,7 @@ def chat(req: ChatRequest):
             skill_data = get_skill(skill)
             if skill_data:
                 skill_instructions = f"## Active Skill: /{skill_data['name']}\n{skill_data['body']}"
-        response = ingest(message, user_id=req.user_id, skill_instructions=skill_instructions)
+        response = ingest(message, user_id=req.user_id, skill_instructions=skill_instructions, skill_name=skill)
 
     return {"response": response, "mode": mode, "skill": skill}
 

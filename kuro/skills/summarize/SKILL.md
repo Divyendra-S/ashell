@@ -34,3 +34,8 @@ Present a structured summary with:
 - **Knowledge Gaps**: Areas where more information could be added
 
 Keep the summary concise but comprehensive. Every claim should trace back to specific KB content.
+
+## Gotchas
+- **Chunk retrieval may miss content.** Long articles get split into chunks, and hybrid search may only return a few. Use `read_article` to load full article content when a topic spans a large document.
+- **Don't confuse "not in KB" with "not true."** Knowledge Gaps should be framed as "the KB doesn't cover X" not "X is unknown."
+- **Avoid restating the same fact under multiple themes.** Deduplicate information across thematic sections.

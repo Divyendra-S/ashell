@@ -1,9 +1,13 @@
 import logging
+import math
 from datetime import datetime, timezone
+from pathlib import Path
 
 from supabase import create_client
 
 from kuro.config import SUPABASE_URL, SUPABASE_KEY
+
+_PROFILES_DIR = Path(__file__).parent.parent.parent / "data" / "user_profiles"
 
 log = logging.getLogger("kuro.store")
 
@@ -179,28 +183,158 @@ def get_relations_for_entity_enriched(entity_id: int) -> list[dict]:
 
 # --- User Memory CRUD ---
 
-def upsert_user_memory(user_id: str, name: str, memory_type: str, content: str) -> dict:
+# Consolidation thresholds
+_MERGE_THRESHOLD = 0.85    # Auto-merge: memories are about the same thing
+_CONFLICT_THRESHOLD = 0.70  # Conflict zone: same topic, possibly contradicting
+
+
+def _embed_and_find_similar(
+    user_id: str, content: str, exclude_name: str | None = None, threshold: float = _CONFLICT_THRESHOLD,
+) -> tuple[list[dict], list[float]]:
+    """Embed memory content and find semantically similar existing memories."""
+    from kuro.core.llm import embed_text
+    embedding = embed_text(content)
+    try:
+        similar = supabase.rpc("match_memories", {
+            "query_embedding": str(embedding),
+            "match_threshold": threshold,
+            "match_count": 5,
+            "p_user_id": user_id,
+        }).execute().data
+    except Exception:
+        log.warning("match_memories RPC failed, skipping consolidation")
+        similar = []
+    if exclude_name:
+        similar = [m for m in similar if m["name"] != exclude_name]
+    return similar, embedding
+
+
+def upsert_user_memory(
+    user_id: str,
+    name: str,
+    memory_type: str,
+    content: str,
+    importance: int = 5,
+    source: str = "agent",
+    expires_at: str | None = None,
+    auto_consolidate: bool = True,
+) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
     existing = supabase.table("user_memories").select("*").eq("user_id", user_id).eq("name", name).execute()
+    payload = {
+        "type": memory_type,
+        "content": content,
+        "importance": max(1, min(10, importance)),
+        "source": source,
+        "updated_at": now,
+    }
+    if expires_at is not None:
+        payload["expires_at"] = expires_at
+
+    # Auto-consolidation: embed content, find similar memories, merge/replace
+    consolidated_from = []
+    embedding = None
+    if auto_consolidate:
+        try:
+            similar, embedding = _embed_and_find_similar(user_id, content, exclude_name=name)
+            for mem in similar:
+                sim = mem.get("similarity", 0)
+                if sim >= _MERGE_THRESHOLD:
+                    # Very similar → auto-merge (delete old, new content wins)
+                    log.info(f"Auto-merging memory '{mem['name']}' (similarity={sim:.2f}) into '{name}'")
+                    consolidated_from.append({"name": mem["name"], "action": "merged", "similarity": sim})
+                    # Keep higher importance
+                    payload["importance"] = max(payload["importance"], mem.get("importance", 5))
+                    delete_user_memory(user_id, mem["name"])
+                elif sim >= _CONFLICT_THRESHOLD and mem.get("type") == memory_type:
+                    # Same type, moderately similar → conflict, newer wins
+                    log.info(f"Resolving conflict: replacing '{mem['name']}' (similarity={sim:.2f}) with '{name}'")
+                    consolidated_from.append({"name": mem["name"], "action": "replaced", "similarity": sim})
+                    delete_user_memory(user_id, mem["name"])
+        except Exception as e:
+            log.warning(f"Consolidation failed, saving without: {e}")
+
+    if embedding is not None:
+        payload["embedding"] = str(embedding)
+
     if existing.data:
-        updated = supabase.table("user_memories").update({
-            "type": memory_type,
-            "content": content,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("user_id", user_id).eq("name", name).execute()
-        return updated.data[0]
+        updated = supabase.table("user_memories").update(payload).eq("user_id", user_id).eq("name", name).execute()
+        result = updated.data[0]
     else:
-        inserted = supabase.table("user_memories").insert({
-            "user_id": user_id,
-            "name": name,
-            "type": memory_type,
-            "content": content,
-        }).execute()
-        return inserted.data[0]
+        payload.update({"user_id": user_id, "name": name})
+        inserted = supabase.table("user_memories").insert(payload).execute()
+        result = inserted.data[0]
+
+    if consolidated_from:
+        result["_consolidated_from"] = consolidated_from
+    return result
 
 
 def get_user_memories(user_id: str) -> list[dict]:
     result = supabase.table("user_memories").select("*").eq("user_id", user_id).order("updated_at", desc=True).execute()
     return result.data
+
+
+def _recency_weight(updated_at: str) -> float:
+    """Compute a decay weight based on how old the memory is."""
+    try:
+        ts = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return 0.3
+    age_days = (datetime.now(timezone.utc) - ts).total_seconds() / 86400
+    if age_days < 7:
+        return 1.0
+    if age_days < 30:
+        return 0.8
+    if age_days < 90:
+        return 0.5
+    return 0.3
+
+
+def get_top_memories(user_id: str, limit: int = 10) -> list[dict]:
+    """Get the most relevant memories using importance × recency scoring."""
+    all_mems = get_user_memories(user_id)
+    now = datetime.now(timezone.utc)
+    # Filter out expired memories
+    active = []
+    for m in all_mems:
+        if m.get("expires_at"):
+            try:
+                exp = datetime.fromisoformat(m["expires_at"].replace("Z", "+00:00"))
+                if exp < now:
+                    continue
+            except (ValueError, AttributeError):
+                pass
+        active.append(m)
+    # Score and rank
+    for m in active:
+        importance = m.get("importance", 5)
+        recency = _recency_weight(m.get("updated_at", ""))
+        m["_score"] = importance * recency
+    active.sort(key=lambda m: m["_score"], reverse=True)
+    result = active[:limit]
+    # Clean up internal score field
+    for m in result:
+        m.pop("_score", None)
+    return result
+
+
+def search_user_memories(user_id: str, query: str) -> list[dict]:
+    """Search user memories by content (case-insensitive substring match)."""
+    all_mems = get_user_memories(user_id)
+    q = query.lower()
+    return [m for m in all_mems if q in m.get("content", "").lower() or q in m.get("name", "").lower()]
+
+
+def touch_memory(user_id: str, name: str) -> None:
+    """Update access tracking for a memory."""
+    mem = get_user_memory(user_id, name)
+    if mem:
+        count = (mem.get("access_count") or 0) + 1
+        supabase.table("user_memories").update({
+            "last_accessed_at": datetime.now(timezone.utc).isoformat(),
+            "access_count": count,
+        }).eq("user_id", user_id).eq("name", name).execute()
 
 
 def get_user_memory(user_id: str, name: str) -> dict | None:
@@ -211,3 +345,22 @@ def get_user_memory(user_id: str, name: str) -> dict | None:
 def delete_user_memory(user_id: str, name: str) -> bool:
     result = supabase.table("user_memories").delete().eq("user_id", user_id).eq("name", name).execute()
     return len(result.data) > 0
+
+
+# --- User Profile (markdown, progressive disclosure) ---
+
+def read_user_profile(user_id: str) -> str:
+    """Read the user's markdown profile. Returns empty string if none exists."""
+    path = _PROFILES_DIR / user_id / "profile.md"
+    if not path.exists():
+        return ""
+    return path.read_text()
+
+
+def update_user_profile(user_id: str, content: str) -> str:
+    """Write/overwrite the user's markdown profile."""
+    d = _PROFILES_DIR / user_id
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / "profile.md"
+    path.write_text(content)
+    return str(path)

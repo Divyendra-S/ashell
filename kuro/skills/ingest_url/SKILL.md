@@ -46,3 +46,8 @@ Provide a summary of everything extracted:
 - Any notable connections discovered
 
 Be thorough — the goal is to make every piece of knowledge in this article retrievable later.
+
+## Gotchas
+- **Some sites block scraping.** If `scrape_url` returns an error or empty content, tell the user to paste the article content directly instead of retrying.
+- **Don't create duplicate entities.** Before calling `store_entity`, check if the entity might already exist in the KB using `get_facts_for_entity`. If it does, add new facts/relations to the existing entity rather than creating a duplicate.
+- **Quality over quantity for facts.** Extract meaningful, specific facts — not trivial ones like "X is a company" when the article is about X's product launch.

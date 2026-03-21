@@ -4,14 +4,17 @@ import logging
 from kuro.core.llm import run_agent_loop
 from kuro.core.retrieval import rewrite_query, hybrid_retrieve, rrf_merge
 from kuro.memory import store
-from kuro.skills import get_skill, get_skill_index
+from kuro.skills import get_skill, get_skill_index, get_skill_guards, read_skill_data, append_skill_data
 
 log = logging.getLogger("kuro.query")
 
 SYSTEM_PROMPT_TEMPLATE = (
     "You are a knowledge retrieval agent. Relevant context from the knowledge base "
     "has been retrieved for you below.\n\n"
-    "## Your Memory (about this user)\n{user_memory}\n\n"
+    "## User Profile\n{user_profile}\n\n"
+    "## Your Memory (about this user)\n"
+    "These are your top memories ranked by importance and recency. "
+    "Use `search_memories` to find more.\n{user_memory}\n\n"
     "## Retrieved Context\n{context}\n\n"
     "## Available Tools\n"
     "If the retrieved context is insufficient, you can use these tools to explore further:\n"
@@ -22,15 +25,36 @@ SYSTEM_PROMPT_TEMPLATE = (
     "- list_articles: Overview of all saved articles\n"
     "- save_memory: Save a memory about the user (preference, context, or instruction)\n"
     "- list_memories: List all saved memories for the current user\n"
+    "- search_memories: Search memories by keyword when you need context not shown above\n"
     "- delete_memory: Remove a saved memory\n\n"
     "## Memory Management\n"
     "When the user shares personal preferences, context about themselves, or "
     "standing instructions, save them using save_memory. Do this proactively — "
-    "you don't need to be explicitly asked. Examples:\n"
-    "- 'I'm a backend engineer' → save as context\n"
-    "- 'I prefer short answers' → save as preference\n"
-    "- 'always check the deployment guide first' → save as instruction\n"
+    "you don't need to be explicitly asked.\n\n"
+    "**Importance levels (1-10):**\n"
+    "- 9-10: Critical instructions ('never do X', 'always check Y first')\n"
+    "- 7-8: Strong preferences ('I prefer short answers', 'I'm a backend engineer')\n"
+    "- 5-6: Useful context ('studying React', 'works on project X')\n"
+    "- 3-4: Casual facts ('mentioned liking Python', 'asked about topic Y')\n"
+    "- 1-2: Ephemeral notes (temporary debugging context, one-off mentions)\n\n"
+    "Examples:\n"
+    "- 'I'm a backend engineer' → save as context, importance=7\n"
+    "- 'I prefer short answers' → save as preference, importance=8\n"
+    "- 'always check the deployment guide first' → save as instruction, importance=9\n"
+    "- 'I'm debugging auth today' → save as context, importance=3, expires in 1 day\n"
     "Confirm briefly when you save a memory.\n\n"
+    "## Memory Consolidation\n"
+    "Only your top memories are shown above. When you notice related or redundant "
+    "memories (e.g., multiple study sessions on the same topic), consolidate them "
+    "into a single updated memory using save_memory with the same name. "
+    "Prefer one evolving summary over many granular entries.\n\n"
+    "## User Profile Management\n"
+    "The User Profile above is a living markdown document you maintain. "
+    "Use `update_profile` to keep it current when you learn significant new info "
+    "about the user — background, expertise, active projects, knowledge gaps from "
+    "study sessions, or preferences. Read the existing profile first (it's in the "
+    "system prompt), then write back the full updated markdown. Don't update on "
+    "every interaction — only when there's meaningful new information.\n\n"
     "Cite your sources. If nothing is found, say so."
 )
 
@@ -104,16 +128,24 @@ TOOLS = [
             },
             {
                 "name": "save_memory",
-                "description": "Save a memory about the current user. Use proactively when user shares preferences, context, or instructions.",
+                "description": "Save a memory about the current user. Use proactively when user shares preferences, context, or instructions. Assign importance based on how critical the memory is.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "name": {"type": "string", "description": "Short identifier for this memory (e.g. 'preferred_response_style')"},
+                        "name": {"type": "string", "description": "Short identifier for this memory (e.g. 'preferred_response_style'). Reuse the same name to update an existing memory."},
                         "content": {"type": "string", "description": "The memory content to save"},
                         "type": {
                             "type": "string",
                             "description": "Type of memory",
                             "enum": ["preference", "context", "instruction"],
+                        },
+                        "importance": {
+                            "type": "integer",
+                            "description": "How important is this memory? 1-2=ephemeral, 3-4=casual, 5-6=useful, 7-8=strong preference, 9-10=critical instruction. Default 5.",
+                        },
+                        "expires_at": {
+                            "type": "string",
+                            "description": "Optional ISO timestamp when this memory should expire. Use for temporary context (e.g. 'debugging auth today').",
                         },
                     },
                     "required": ["name", "content", "type"],
@@ -138,6 +170,83 @@ TOOLS = [
                     "required": ["name"],
                 },
             },
+            {
+                "name": "search_memories",
+                "description": "Search all saved memories by keyword. Use when the top memories shown in context aren't enough and you need to find older or lower-importance memories.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Keyword to search for in memory names and content"},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "update_profile",
+                "description": "Update the user's living profile — a markdown document summarizing their background, preferences, knowledge gaps, and active projects. Write the full markdown content (not a diff).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string", "description": "Full markdown content for the user profile"},
+                    },
+                    "required": ["content"],
+                },
+            },
+        ]
+    }
+]
+
+SKILL_HELPER_TOOLS = {
+    "study": [
+        {
+            "functionDeclarations": [
+                {
+                    "name": "analyze_study_progress",
+                    "description": "Analyze the user's study session history — returns avg scores, trends, weak/strong topics. Use before generating questions to avoid repeats and target weak areas.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            ]
+        }
+    ],
+    "review": [
+        {
+            "functionDeclarations": [
+                {
+                    "name": "kb_health_report",
+                    "description": "Analyze the knowledge base — returns entity/fact/article counts, orphan entities, sparse topics, and actionable suggestions.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            ]
+        }
+    ],
+}
+
+SKILL_DATA_TOOLS = [
+    {
+        "functionDeclarations": [
+            {
+                "name": "read_skill_data",
+                "description": "Read stored data from the active skill's data directory (e.g., past study sessions, research logs). Returns a list of JSON records.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": {"type": "string", "description": "Data file to read (e.g. 'sessions.jsonl', 'research_log.jsonl')"},
+                    },
+                    "required": ["filename"],
+                },
+            },
+            {
+                "name": "append_skill_data",
+                "description": "Append a data record to the active skill's data directory. Use for saving session results, logs, or progress.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": {"type": "string", "description": "Data file to append to (e.g. 'sessions.jsonl')"},
+                        "record": {"type": "object", "description": "JSON record to save"},
+                    },
+                    "required": ["filename", "record"],
+                },
+            },
         ]
     }
 ]
@@ -152,12 +261,14 @@ def _format_user_memory(memories: list[dict]) -> str:
         grouped.setdefault(m["type"], []).append(m)
 
     sections = []
-    for mem_type in ("preference", "context", "instruction"):
+    for mem_type in ("instruction", "preference", "context"):
         items = grouped.get(mem_type, [])
         if items:
             lines = [f"### {mem_type.title()}s"]
             for item in items:
-                lines.append(f"- **{item['name']}**: {item['content']}")
+                imp = item.get("importance", 5)
+                imp_tag = f" [importance={imp}]" if imp != 5 else ""
+                lines.append(f"- **{item['name']}**: {item['content']}{imp_tag}")
             sections.append("\n".join(lines))
 
     return "\n\n".join(sections)
@@ -205,8 +316,17 @@ def _make_tool_executor(user_id: str):
             return json.dumps(result, default=str)
 
         elif name == "save_memory":
-            result = store.upsert_user_memory(user_id, args["name"], args["type"], args["content"])
-            return json.dumps({"status": "saved", "memory": result}, default=str)
+            result = store.upsert_user_memory(
+                user_id, args["name"], args["type"], args["content"],
+                importance=args.get("importance", 5),
+                source=args.get("source", "agent"),
+                expires_at=args.get("expires_at"),
+            )
+            consolidated = result.pop("_consolidated_from", [])
+            response = {"status": "saved", "memory": result}
+            if consolidated:
+                response["consolidated_from"] = consolidated
+            return json.dumps(response, default=str)
 
         elif name == "list_memories":
             result = store.get_user_memories(user_id)
@@ -216,8 +336,34 @@ def _make_tool_executor(user_id: str):
             deleted = store.delete_user_memory(user_id, args["name"])
             return json.dumps({"status": "deleted" if deleted else "not_found", "name": args["name"]})
 
+        elif name == "search_memories":
+            results = store.search_user_memories(user_id, args["query"])
+            return json.dumps(results, default=str)
+
+        elif name == "update_profile":
+            path = store.update_user_profile(user_id, args["content"])
+            return json.dumps({"status": "updated", "path": path})
+
         return f"Unknown tool: {name}"
 
+    return execute_tool
+
+
+def _make_skill_data_executor(skill_name: str, user_id: str):
+    def execute_tool(name: str, args: dict) -> str:
+        if name == "read_skill_data":
+            records = read_skill_data(skill_name, args["filename"], user_id=user_id)
+            return json.dumps({"records": records, "count": len(records)}, default=str)
+        elif name == "append_skill_data":
+            result = append_skill_data(skill_name, args["filename"], args["record"], user_id=user_id)
+            return json.dumps({"status": "saved", "message": result})
+        elif name == "analyze_study_progress":
+            from kuro.skills.study.scripts.analyze_progress import analyze_progress
+            return json.dumps(analyze_progress(user_id), default=str)
+        elif name == "kb_health_report":
+            from kuro.skills.review.scripts.kb_health import kb_health_report
+            return json.dumps(kb_health_report(user_id), default=str)
+        return None
     return execute_tool
 
 
@@ -267,9 +413,10 @@ def query(user_text: str, history: list[dict] | None = None, user_id: str = "def
     top = rrf_merge(raw, top_k=8)
     context = _format_context(top)
 
-    memories = store.get_user_memories(user_id)
+    memories = store.get_top_memories(user_id, limit=10)
     user_memory = _format_user_memory(memories)
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context, user_memory=user_memory)
+    user_profile = store.read_user_profile(user_id) or "No profile yet. Create one when you learn about this user."
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context, user_memory=user_memory, user_profile=user_profile)
 
     # Append skill index for auto-detection
     system_prompt += "\n\n" + get_skill_index()
@@ -283,5 +430,23 @@ def query(user_text: str, history: list[dict] | None = None, user_id: str = "def
     contents = history or []
     contents.append({"role": "user", "parts": [{"text": user_text}]})
 
-    tool_executor = _make_tool_executor(user_id)
-    return run_agent_loop(contents, TOOLS, tool_executor, system_instruction=system_prompt)
+    # Compose tools: always include base tools, add skill data tools when a skill is active
+    active_tools = list(TOOLS)
+    base_executor = _make_tool_executor(user_id)
+    guards = get_skill_guards(skill) if skill else None
+
+    if skill:
+        active_tools.extend(SKILL_DATA_TOOLS)
+        if skill in SKILL_HELPER_TOOLS:
+            active_tools.extend(SKILL_HELPER_TOOLS[skill])
+        skill_data_executor = _make_skill_data_executor(skill, user_id)
+
+        def combined_executor(name: str, args: dict) -> str:
+            result = skill_data_executor(name, args)
+            if result is not None:
+                return result
+            return base_executor(name, args)
+
+        return run_agent_loop(contents, active_tools, combined_executor, system_instruction=system_prompt, guards=guards)
+
+    return run_agent_loop(contents, active_tools, base_executor, system_instruction=system_prompt)

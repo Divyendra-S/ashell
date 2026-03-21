@@ -65,8 +65,14 @@ def run_agent_loop(
     tools: list[dict],
     tool_executor: Callable[[str, dict], str],
     system_instruction: str | None = None,
+    guards: list[Callable[[str, dict], str | None]] | None = None,
 ) -> str:
-    """Generalized agent loop. Calls Gemini, executes tools via callback, repeats until text."""
+    """Generalized agent loop. Calls Gemini, executes tools via callback, repeats until text.
+
+    Args:
+        guards: Optional list of guard functions. Each takes (tool_name, args) and returns
+                an error message string if the call should be blocked, or None to allow it.
+    """
     while True:
         start = time.time()
         response = call_gemini(contents, tools=tools, system_instruction=system_instruction)
@@ -90,7 +96,14 @@ def run_agent_loop(
             args = fc["args"]
             log.info(f"Tool: {name}({args})")
 
-            result = tool_executor(name, args)
+            # Check guards before executing
+            blocked = None
+            if guards:
+                for guard in guards:
+                    blocked = guard(name, args)
+                    if blocked:
+                        break
+            result = blocked if blocked else tool_executor(name, args)
 
             function_response_parts.append({
                 "functionResponse": {

@@ -37,3 +37,18 @@ You are performing a deep research task. Follow this multi-pass workflow:
   - **Sources**: list all articles and entities referenced
 
 Always cite which article or entity each claim comes from. If the KB lacks information, say so clearly rather than speculating.
+
+## Save Research Log
+After completing the report:
+- Save detailed log using `append_skill_data` to `research_log.jsonl`:
+  - `{"query": "...", "date": "...", "sub_questions": [...], "sources_used": [...], "gaps_found": [...]}`
+- Also use `save_memory` to update the user's memory with a summary:
+  - name: `research_{topic}_latest`, type: `context`
+  - content: "Researched {topic} ({date}). Key findings: {summary}. Gaps: {list}. Sources: {count} articles, {count} entities."
+  - This helps future research sessions build on past findings without re-reading logs
+
+## Gotchas
+- **Never fabricate connections.** If two entities aren't linked in the knowledge graph, don't invent a relationship. State "no direct connection found in KB" instead.
+- **Sparse graphs are normal.** If the KB only has 1-2 sources on a sub-question, say so in the Gaps section rather than over-interpreting thin data.
+- **Use `read_article` for depth.** Chunk-based retrieval may miss important context. When a chunk looks relevant, load the full article before synthesizing.
+- For the report format, see `report_template.md` in this skill folder.

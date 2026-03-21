@@ -1,7 +1,9 @@
+import json
 import yaml
 from pathlib import Path
 
 _SKILLS_DIR = Path(__file__).parent
+_DATA_DIR = Path(__file__).parent.parent.parent / "data" / "skill_data"
 _cache: dict[str, dict] = {}
 
 
@@ -15,6 +17,7 @@ def _parse_skill_md(path: Path) -> dict:
         "description": meta["description"],
         "triggers": meta.get("triggers", []),
         "mode": meta.get("mode", "query"),
+        "guards": meta.get("guards", []),
         "body": body,
     }
 
@@ -32,6 +35,63 @@ def load_skills() -> dict[str, dict]:
 
 def get_skill(name: str) -> dict | None:
     return load_skills().get(name)
+
+
+def get_skill_data_dir(skill_name: str, user_id: str = "default") -> Path:
+    """Return (and create) the per-user data directory for a skill."""
+    d = _DATA_DIR / user_id / skill_name
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def read_skill_data(skill_name: str, filename: str, user_id: str = "default") -> list[dict]:
+    """Read a JSONL file from a user's skill data directory. Returns list of records."""
+    path = get_skill_data_dir(skill_name, user_id) / filename
+    if not path.exists():
+        return []
+    records = []
+    for line in path.read_text().strip().splitlines():
+        if line.strip():
+            records.append(json.loads(line))
+    return records
+
+
+def append_skill_data(skill_name: str, filename: str, record: dict, user_id: str = "default") -> str:
+    """Append a JSON record to a user's skill JSONL data file."""
+    path = get_skill_data_dir(skill_name, user_id) / filename
+    with open(path, "a") as f:
+        f.write(json.dumps(record) + "\n")
+    return f"Saved to {path}"
+
+
+# --- Guard Registry ---
+# Guards are functions that check if a tool call should be blocked.
+# They return an error message string if blocked, or None if allowed.
+
+_WRITE_TOOLS = {"store_entity", "store_fact", "store_relation", "save_article", "append_skill_data", "save_memory"}
+
+def _guard_no_store(name: str, args: dict) -> str | None:
+    """Block all write/store tools — read-only mode."""
+    if name in _WRITE_TOOLS:
+        return f"Tool '{name}' is blocked: this skill runs in read-only mode."
+    return None
+
+
+GUARD_REGISTRY: dict[str, callable] = {
+    "read_only": _guard_no_store,
+}
+
+
+def get_skill_guards(skill_name: str) -> list[callable]:
+    """Return guard functions for a skill based on its frontmatter."""
+    skill = get_skill(skill_name)
+    if not skill:
+        return []
+    guards = []
+    for guard_name in skill.get("guards", []):
+        if guard_name in GUARD_REGISTRY:
+            guards.append(GUARD_REGISTRY[guard_name])
+    return guards
 
 
 def get_skill_index() -> str:

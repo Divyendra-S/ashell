@@ -3,6 +3,7 @@ import logging
 
 from kuro.core.llm import run_agent_loop
 from kuro.memory import store
+from kuro.skills import read_skill_data, append_skill_data
 
 log = logging.getLogger("kuro.ingest")
 
@@ -72,6 +73,17 @@ TOOLS = [
                 },
             },
             {
+                "name": "lookup_entity",
+                "description": "Check if an entity already exists in the KB. Use before store_entity to avoid duplicates.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "entity_name": {"type": "string", "description": "Name of the entity to look up"},
+                    },
+                    "required": ["entity_name"],
+                },
+            },
+            {
                 "name": "save_article",
                 "description": "Save a scraped article to disk and store its metadata. Use after scrape_url.",
                 "parameters": {
@@ -127,6 +139,13 @@ def _make_tool_executor(user_id: str):
             )
             return json.dumps({"status": "ok", "relation": result}, default=str)
 
+        elif name == "lookup_entity":
+            entity = store.get_entity_by_name(args["entity_name"], user_id=user_id)
+            if entity:
+                facts = store.get_facts_for_entity(entity["id"])
+                return json.dumps({"exists": True, "entity": entity, "facts": facts}, default=str)
+            return json.dumps({"exists": False, "entity_name": args["entity_name"]})
+
         elif name == "scrape_url":
             from kuro.memory.scraper import scrape_url
             try:
@@ -153,11 +172,60 @@ def _make_tool_executor(user_id: str):
     return execute_tool
 
 
-def ingest(user_text: str, history: list[dict] | None = None, user_id: str = "default", skill_instructions: str | None = None) -> str:
+SKILL_DATA_TOOLS = [
+    {
+        "functionDeclarations": [
+            {
+                "name": "read_skill_data",
+                "description": "Read stored data from the active skill's data directory. Returns a list of JSON records.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": {"type": "string", "description": "Data file to read (e.g. 'sessions.jsonl')"},
+                    },
+                    "required": ["filename"],
+                },
+            },
+            {
+                "name": "append_skill_data",
+                "description": "Append a data record to the active skill's data directory.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": {"type": "string", "description": "Data file to append to"},
+                        "record": {"type": "object", "description": "JSON record to save"},
+                    },
+                    "required": ["filename", "record"],
+                },
+            },
+        ]
+    }
+]
+
+
+def ingest(user_text: str, history: list[dict] | None = None, user_id: str = "default",
+           skill_instructions: str | None = None, skill_name: str | None = None) -> str:
     system = SYSTEM_PROMPT
     if skill_instructions:
         system += "\n\n" + skill_instructions
     contents = history or []
     contents.append({"role": "user", "parts": [{"text": user_text}]})
-    tool_executor = _make_tool_executor(user_id)
-    return run_agent_loop(contents, TOOLS, tool_executor, system_instruction=system)
+
+    active_tools = list(TOOLS)
+    base_executor = _make_tool_executor(user_id)
+
+    if skill_name:
+        active_tools.extend(SKILL_DATA_TOOLS)
+
+        def combined_executor(name: str, args: dict) -> str:
+            if name == "read_skill_data":
+                records = read_skill_data(skill_name, args["filename"], user_id=user_id)
+                return json.dumps({"records": records, "count": len(records)}, default=str)
+            elif name == "append_skill_data":
+                result = append_skill_data(skill_name, args["filename"], args["record"], user_id=user_id)
+                return json.dumps({"status": "saved", "message": result})
+            return base_executor(name, args)
+
+        return run_agent_loop(contents, active_tools, combined_executor, system_instruction=system)
+
+    return run_agent_loop(contents, active_tools, base_executor, system_instruction=system)

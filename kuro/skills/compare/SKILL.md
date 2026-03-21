@@ -42,3 +42,8 @@ After the table, provide:
 - **What's Missing**: Dimensions where the KB lacks information
 
 Keep all claims grounded in retrieved knowledge. Do not fill in cells with general knowledge if the KB doesn't have the information — mark them as "Not in KB" instead.
+
+## Gotchas
+- **Flag data imbalance.** If the KB has 20 facts about subject A but only 2 about subject B, say so upfront. Don't pad subject B with vague statements to make the table look balanced.
+- **"Not in KB" is a valid and important cell value.** Resist the urge to fill gaps with general knowledge — the user trusts this as their personal KB, not Wikipedia.
+- **Don't force dimensions.** If the KB only supports 2-3 meaningful comparison dimensions, that's fine. A 3-row table with solid data beats a 10-row table with mostly "Not in KB."
