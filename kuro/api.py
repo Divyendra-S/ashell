@@ -1,14 +1,15 @@
+import asyncio
 import logging
 import re
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from kuro.agents.ingest import ingest
 from kuro.agents.query import query
 from kuro.cli import classify, SLASH_CMD_PATTERN
-from kuro.memory import store
+from kuro.memory import store, checkin_store
 from kuro.skills import load_skills, get_skill
 
 logging.basicConfig(level=logging.INFO)
@@ -108,3 +109,98 @@ def list_entities(search: str | None = None, user_id: str = "default"):
     else:
         entities = store.supabase.table("entities").select("*").eq("user_id", user_id).execute().data
     return {"entities": entities}
+
+
+# --- Voice Agent (Pipecat SmallWebRTC) ---
+
+from pipecat.transports.smallwebrtc.request_handler import (
+    SmallWebRTCRequestHandler,
+    SmallWebRTCRequest,
+    SmallWebRTCPatchRequest,
+    IceCandidate,
+)
+
+_webrtc_handler = SmallWebRTCRequestHandler()
+
+
+async def _on_webrtc_connection(connection):
+    """Called when a new WebRTC peer connects. Sets up the voice pipeline."""
+    from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+    from pipecat.transports.base_transport import TransportParams
+    from pipecat.audio.vad.silero import SileroVADAnalyzer
+    from pipecat.pipeline.runner import PipelineRunner
+    from kuro.agents.voice import create_voice_pipeline, _generate_session_summary
+
+    # Extract user_id from the request data passed via the client
+    user_id = getattr(connection, "_kuro_user_id", "default")
+
+    transport = SmallWebRTCTransport(
+        webrtc_connection=connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
+
+    task, session_id = await create_voice_pipeline(transport, user_id)
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_disconnected(transport, client):
+        try:
+            entries = checkin_store.get_session_entries(session_id)
+            if entries:
+                summary = _generate_session_summary(entries)
+                checkin_store.end_checkin_session(session_id, summary)
+        except Exception as e:
+            logging.getLogger("kuro.voice").warning(f"Failed to close session on disconnect: {e}")
+        await task.cancel()
+
+    runner = PipelineRunner(handle_sigint=False)
+    asyncio.create_task(runner.run(task))
+
+
+@app.post("/api/offer")
+async def webrtc_offer(request: Request):
+    """Handle WebRTC SDP offer from the client SDK."""
+    body = await request.json()
+
+    # Extract user_id from requestData before creating connection
+    request_data = body.get("requestData") or body.get("request_data") or {}
+    user_id = request_data.get("user_id", "default")
+
+    webrtc_request = SmallWebRTCRequest(
+        sdp=body["sdp"],
+        type=body["type"],
+        pc_id=body.get("pc_id"),
+        restart_pc=body.get("restart_pc"),
+        request_data=request_data,
+    )
+
+    # Wrap the callback to inject user_id onto the connection
+    async def connection_callback(connection):
+        connection._kuro_user_id = user_id
+        await _on_webrtc_connection(connection)
+
+    answer = await _webrtc_handler.handle_web_request(webrtc_request, connection_callback)
+    return answer
+
+
+@app.patch("/api/offer")
+async def webrtc_ice_candidate(request: Request):
+    """Handle WebRTC ICE candidates from the client SDK."""
+    body = await request.json()
+    patch_request = SmallWebRTCPatchRequest(
+        pc_id=body["pc_id"],
+        candidates=[IceCandidate(**c) for c in body.get("candidates", [])],
+    )
+    await _webrtc_handler.handle_patch_request(patch_request)
+    return {"status": "ok"}
+
+
+@app.get("/api/voice/sessions")
+def voice_sessions(user_id: str = "default", limit: int = 7):
+    """Get recent check-in sessions for a user."""
+    sessions = checkin_store.get_recent_sessions(user_id, limit=limit)
+    return {"sessions": sessions}

@@ -8,6 +8,9 @@
     "start": "next start"
   },
   "dependencies": {
+    "@pipecat-ai/client-js": "^1.7.0",
+    "@pipecat-ai/client-react": "^1.2.0",
+    "@pipecat-ai/small-webrtc-transport": "^1.10.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3"
