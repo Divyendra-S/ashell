@@ -99,28 +99,8 @@ export default function VoicePage() {
   if (!userId) return null;
 
   return (
-    <div className="flex min-h-screen flex-col bg-surface-0 text-text-primary">
+    <div className="flex h-full flex-col bg-surface-0 text-text-primary">
       <audio ref={audioRef} autoPlay />
-      {/* Header */}
-      <header className="border-b border-surface-2 px-6 py-4">
-        <div className="mx-auto flex max-w-3xl items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => router.push("/")}
-              className="text-text-tertiary transition-colors hover:text-text-primary"
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                <path d="M12 4L6 10L12 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            <h1 className="text-xs font-semibold uppercase tracking-[0.2em] text-text-secondary">
-              Kuro Voice
-            </h1>
-          </div>
-          <span className="text-xs text-text-tertiary">{userId}</span>
-        </div>
-      </header>
-
       {/* Main content */}
       <main className="flex flex-1 flex-col items-center justify-center px-6">
         <div className="flex flex-col items-center gap-8">

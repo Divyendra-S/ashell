@@ -111,6 +111,57 @@ def list_entities(search: str | None = None, user_id: str = "default"):
     return {"entities": entities}
 
 
+@app.get("/api/graph")
+def graph_endpoint(user_id: str = "default"):
+    return store.get_full_graph(user_id)
+
+
+@app.get("/api/stats")
+def stats_endpoint(user_id: str = "default"):
+    return store.get_stats(user_id)
+
+
+@app.get("/api/stats/growth")
+def growth_endpoint(user_id: str = "default", days: int = 30):
+    return {"data": store.get_growth_data(user_id, days)}
+
+
+@app.get("/api/entity/{entity_id}")
+def entity_detail_endpoint(entity_id: int, user_id: str = "default"):
+    detail = store.get_entity_detail(entity_id, user_id)
+    if not detail:
+        return {"error": "Entity not found"}, 404
+    return detail
+
+
+@app.get("/api/articles")
+def articles_endpoint(user_id: str = "default"):
+    return {"articles": store.list_articles_enhanced(user_id)}
+
+
+@app.get("/api/progress/timeline")
+def timeline_endpoint(user_id: str = "default", days: int = 30):
+    return {"timeline": checkin_store.get_timeline(user_id, days)}
+
+
+@app.get("/api/progress/streak")
+def streak_endpoint(user_id: str = "default"):
+    return checkin_store.get_streak(user_id)
+
+
+@app.patch("/api/goals/{entry_id}/complete")
+def complete_goal_endpoint(entry_id: int, user_id: str = "default"):
+    result = checkin_store.complete_goal(entry_id, user_id)
+    if not result:
+        return {"error": "Goal not found"}, 404
+    return result
+
+
+@app.get("/api/digest")
+def digest_endpoint(user_id: str = "default"):
+    return checkin_store.get_digest(user_id)
+
+
 # --- Voice Agent (Pipecat SmallWebRTC) ---
 
 from pipecat.transports.smallwebrtc.request_handler import (

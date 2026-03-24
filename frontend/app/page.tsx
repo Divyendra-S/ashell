@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { sendMessage, type ChatResponse } from "../lib/api";
 import { useUser } from "../lib/user";
+import { DigestCard } from "../components/digest-card";
 
 interface Message {
   role: "user" | "kuro";
@@ -19,7 +20,7 @@ const suggestions = [
 ];
 
 export default function Home() {
-  const { userId, logout } = useUser();
+  const { userId } = useUser();
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -36,6 +37,15 @@ export default function Home() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Pick up prefill from entity action buttons
+  useEffect(() => {
+    const prefill = sessionStorage.getItem("kuro_prefill");
+    if (prefill) {
+      setInput(prefill);
+      sessionStorage.removeItem("kuro_prefill");
+    }
+  }, []);
 
   // Auto-resize textarea fallback (Firefox/Safari)
   useEffect(() => {
@@ -55,7 +65,7 @@ export default function Home() {
     // Detect slash command
     let skill: string | undefined;
     let cleanText = text;
-    const slashMatch = text.match(/^\/(\S+)\s*(.*)/s);
+    const slashMatch = text.match(/^\/(\S+)\s*([\s\S]*)/);
     if (slashMatch) {
       skill = slashMatch[1];
       cleanText = slashMatch[2]?.trim() || text;
@@ -88,50 +98,19 @@ export default function Home() {
     }
   }
 
-  function handleLogout() {
-    logout();
-    router.push("/login");
-  }
-
   return (
-    <div className="flex min-h-screen flex-col bg-surface-0 text-text-primary">
-      {/* Header */}
-      <header className="border-b border-surface-2 px-6 py-4">
-        <div className="mx-auto flex max-w-3xl items-center justify-between">
-          <h1 className="text-xs font-semibold uppercase tracking-[0.2em] text-text-secondary">
-            Kuro
-          </h1>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => router.push("/voice")}
-              className="flex items-center gap-1.5 rounded-lg border border-surface-3 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:border-accent/40 hover:text-text-primary"
-              title="Voice Check-in"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="9" y="1" width="6" height="11" rx="3" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
-              </svg>
-              Voice
-            </button>
-            <span className="text-xs text-text-tertiary">{userId}</span>
-            <button
-              onClick={handleLogout}
-              className="rounded-lg border border-surface-3 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:border-accent/40 hover:text-text-primary"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </header>
-
+    <div className="flex h-full flex-col bg-surface-0 text-text-primary">
       {/* Messages */}
       <main className="flex-1 overflow-y-auto px-6 py-8">
         <div className="mx-auto max-w-3xl space-y-6">
           {messages.length === 0 && !loading ? (
             /* Empty state */
-            <div className="flex animate-fade-in flex-col items-center justify-center pt-24 text-center">
+            <div className="flex animate-fade-in flex-col items-center justify-center pt-12 text-center">
+              {/* Digest card */}
+              <div className="mb-8 w-full">
+                <DigestCard userId={userId} />
+              </div>
+
               <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent">
                 <span className="text-lg font-semibold">K</span>
               </div>

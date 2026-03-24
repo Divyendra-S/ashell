@@ -15,13 +15,15 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 def upsert_entity(name: str, entity_type: str, summary: str | None = None, user_id: str = "default") -> dict:
-    existing = supabase.table("entities").select("*").eq("name", name).eq("user_id", user_id).execute()
+    # Case-insensitive lookup to prevent near-duplicates
+    existing = supabase.table("entities").select("*").ilike("name", name).eq("user_id", user_id).execute()
     if existing.data:
+        row = existing.data[0]
         updated = supabase.table("entities").update({
             "entity_type": entity_type,
             "summary": summary,
             "updated_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("name", name).eq("user_id", user_id).execute()
+        }).eq("id", row["id"]).execute()
         return updated.data[0]
     else:
         inserted = supabase.table("entities").insert({
@@ -364,3 +366,161 @@ def update_user_profile(user_id: str, content: str) -> str:
     path = d / "profile.md"
     path.write_text(content)
     return str(path)
+
+
+# --- Dashboard / Graph / Stats ---
+
+def get_full_graph(user_id: str = "default") -> dict:
+    """Return all entities and relations for a user, deduped by case-insensitive name."""
+    raw_entities = supabase.table("entities").select("id, name, entity_type, summary").eq("user_id", user_id).execute().data
+
+    # Get fact counts per entity
+    for e in raw_entities:
+        facts = supabase.table("facts").select("id").eq("entity_id", e["id"]).execute().data
+        e["fact_count"] = len(facts)
+
+    # Deduplicate by case-insensitive name — keep the one with most facts
+    canonical = {}  # lower_name -> entity dict
+    id_remap = {}   # old_id -> canonical_id
+    for e in raw_entities:
+        key = e["name"].lower()
+        if key not in canonical or e["fact_count"] > canonical[key]["fact_count"]:
+            canonical[key] = e
+        id_remap[e["id"]] = None  # will fill after
+
+    # Build final remap
+    for e in raw_entities:
+        key = e["name"].lower()
+        id_remap[e["id"]] = canonical[key]["id"]
+        # Merge fact counts into canonical
+        if e["id"] != canonical[key]["id"]:
+            canonical[key]["fact_count"] += e["fact_count"]
+
+    entities = list(canonical.values())
+    entity_ids = {e["id"] for e in entities}
+
+    # Get all relations with IDs remapped and names resolved
+    relations = []
+    seen_rels = set()
+    all_rels = supabase.table("relations").select("*").eq("user_id", user_id).execute().data
+    name_map = {e["id"]: e["name"] for e in entities}
+
+    for r in all_rels:
+        src = id_remap.get(r["source_id"], r["source_id"])
+        tgt = id_remap.get(r["target_id"], r["target_id"])
+        if src not in entity_ids or tgt not in entity_ids or src == tgt:
+            continue
+        # Deduplicate relations after remapping
+        rel_key = (src, tgt, r["relation_type"])
+        if rel_key in seen_rels:
+            continue
+        seen_rels.add(rel_key)
+        r["source_id"] = src
+        r["target_id"] = tgt
+        r["source_name"] = name_map.get(src, "unknown")
+        r["target_name"] = name_map.get(tgt, "unknown")
+        relations.append(r)
+
+    return {"entities": entities, "relations": relations}
+
+
+def get_stats(user_id: str = "default") -> dict:
+    """Return KB stats with 7-day deltas."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    entity_count = len(supabase.table("entities").select("id").eq("user_id", user_id).execute().data)
+    fact_count = len(supabase.table("facts").select("id").eq("user_id", user_id).execute().data)
+    article_count = len(supabase.table("articles").select("id").eq("user_id", user_id).execute().data)
+    relation_count = len(supabase.table("relations").select("id").eq("user_id", user_id).execute().data)
+
+    # 7-day deltas
+    from datetime import timedelta
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+
+    new_entities = len(supabase.table("entities").select("id").eq("user_id", user_id).gte("created_at", week_ago).execute().data)
+    new_facts = len(supabase.table("facts").select("id").eq("user_id", user_id).gte("created_at", week_ago).execute().data)
+    new_articles = len(supabase.table("articles").select("id").eq("user_id", user_id).gte("created_at", week_ago).execute().data)
+
+    # KB health score (simplified from kb_health_report)
+    orphan_count = 0
+    entities_data = supabase.table("entities").select("id").eq("user_id", user_id).execute().data
+    for e in entities_data:
+        fc = len(supabase.table("facts").select("id").eq("entity_id", e["id"]).execute().data)
+        if fc == 0:
+            orphan_count += 1
+
+    health_score = 100
+    if entity_count > 0:
+        orphan_pct = orphan_count / entity_count
+        health_score -= int(orphan_pct * 40)
+    if article_count < 3:
+        health_score -= 15
+    if fact_count < entity_count:
+        health_score -= 10
+    health_score = max(0, min(100, health_score))
+
+    return {
+        "entity_count": entity_count,
+        "fact_count": fact_count,
+        "article_count": article_count,
+        "relation_count": relation_count,
+        "new_entities_7d": new_entities,
+        "new_facts_7d": new_facts,
+        "new_articles_7d": new_articles,
+        "health_score": health_score,
+    }
+
+
+def get_growth_data(user_id: str = "default", days: int = 30) -> list[dict]:
+    """Return daily counts of entities + facts + articles created for sparkline."""
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    entities = supabase.table("entities").select("created_at").eq("user_id", user_id).gte("created_at", cutoff).execute().data
+    facts = supabase.table("facts").select("created_at").eq("user_id", user_id).gte("created_at", cutoff).execute().data
+    articles = supabase.table("articles").select("created_at").eq("user_id", user_id).gte("created_at", cutoff).execute().data
+
+    # Group by date
+    from collections import defaultdict
+    daily = defaultdict(lambda: {"entities": 0, "facts": 0, "articles": 0})
+
+    for e in entities:
+        day = e["created_at"][:10]
+        daily[day]["entities"] += 1
+    for f in facts:
+        day = f["created_at"][:10]
+        daily[day]["facts"] += 1
+    for a in articles:
+        day = a["created_at"][:10]
+        daily[day]["articles"] += 1
+
+    # Build complete list for all days in range
+    result = []
+    today = datetime.now(timezone.utc).date()
+    for i in range(days):
+        d = today - timedelta(days=days - 1 - i)
+        day_str = d.isoformat()
+        counts = daily.get(day_str, {"entities": 0, "facts": 0, "articles": 0})
+        result.append({"date": day_str, **counts})
+
+    return result
+
+
+def get_entity_detail(entity_id: int, user_id: str = "default") -> dict | None:
+    """Get full entity detail: entity + facts + enriched relations."""
+    result = supabase.table("entities").select("*").eq("id", entity_id).eq("user_id", user_id).execute()
+    if not result.data:
+        return None
+    entity = result.data[0]
+    entity["facts"] = get_facts_for_entity(entity_id)
+    entity["relations"] = get_relations_for_entity_enriched(entity_id)
+    return entity
+
+
+def list_articles_enhanced(user_id: str = "default") -> list[dict]:
+    """Articles with chunk count and read status."""
+    articles = supabase.table("articles").select("id, title, url, file_path, is_read, read_at, created_at").eq("user_id", user_id).order("created_at", desc=True).execute().data
+    for a in articles:
+        chunks = supabase.table("article_chunks").select("id").eq("article_id", a["id"]).execute().data
+        a["chunk_count"] = len(chunks)
+    return articles
