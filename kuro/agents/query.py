@@ -2,7 +2,7 @@ import json
 import logging
 
 from kuro.core.llm import run_agent_loop
-from kuro.core.retrieval import rewrite_query, hybrid_retrieve, rrf_merge
+from kuro.core.retrieval import rewrite_query, hybrid_retrieve, rrf_merge, graph_retrieve
 from kuro.memory import store
 from kuro.skills import get_skill, get_skill_index, get_skill_guards, read_skill_data, append_skill_data
 
@@ -374,6 +374,8 @@ def _format_context(results: list[dict]) -> str:
     entities = [r for r in results if r["type"] == "entity"]
     facts = [r for r in results if r["type"] == "fact"]
     chunks = [r for r in results if r["type"] == "article_chunk"]
+    graph_items = [r for r in results if r["type"] == "graph_neighborhood"]
+    community_items = [r for r in results if r["type"] == "community_summary"]
 
     sections = []
 
@@ -403,6 +405,22 @@ def _format_context(results: list[dict]) -> str:
             lines.append(f"**[{title}]**\n{content}\n")
         sections.append("\n".join(lines))
 
+    if graph_items:
+        lines = ["### Graph Neighborhood"]
+        for g in graph_items:
+            etype = g.get("entity_type", "")
+            label = f" ({etype})" if etype else ""
+            lines.append(f"**{g.get('title', '')}**{label}")
+            lines.append(g.get("content", ""))
+            lines.append("")
+        sections.append("\n".join(lines))
+
+    if community_items:
+        lines = ["### Topic Clusters"]
+        for c in community_items:
+            lines.append(f"- **{c.get('title', '')}**: {c.get('content', '')}")
+        sections.append("\n".join(lines))
+
     return "\n\n".join(sections)
 
 
@@ -411,6 +429,11 @@ def query(user_text: str, history: list[dict] | None = None, user_id: str = "def
     log.info(f"Rewritten queries: {queries}")
     raw = hybrid_retrieve(queries, user_id=user_id)
     top = rrf_merge(raw, top_k=8)
+
+    # Graph-aware retrieval: pull structured neighborhood context
+    graph_context = graph_retrieve(user_text, user_id=user_id)
+    top.extend(graph_context)
+
     context = _format_context(top)
 
     memories = store.get_top_memories(user_id, limit=10)

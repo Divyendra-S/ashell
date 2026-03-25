@@ -41,6 +41,13 @@ class QueryRequest(BaseModel):
     user_id: str = "default"
 
 
+class NoteRequest(BaseModel):
+    content: str
+    user_id: str = "default"
+    entity_id: int | None = None
+    article_id: int | None = None
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
@@ -75,6 +82,12 @@ def chat(req: ChatRequest):
             if skill_data:
                 skill_instructions = f"## Active Skill: /{skill_data['name']}\n{skill_data['body']}"
         response = ingest(message, user_id=req.user_id, skill_instructions=skill_instructions, skill_name=skill)
+        # Auto-rebuild communities after ingestion
+        try:
+            from kuro.memory.communities import rebuild_communities
+            rebuild_communities(req.user_id)
+        except Exception as e:
+            logging.getLogger("kuro.api").warning(f"Community rebuild failed: {e}")
 
     return {"response": response, "mode": mode, "skill": skill}
 
@@ -112,8 +125,9 @@ def list_entities(search: str | None = None, user_id: str = "default"):
 
 
 @app.get("/api/graph")
-def graph_endpoint(user_id: str = "default"):
-    return store.get_full_graph(user_id)
+def graph_endpoint(user_id: str = "default", types: str | None = "topic"):
+    entity_types = types.split(",") if types else None
+    return store.get_full_graph(user_id, entity_types=entity_types)
 
 
 @app.get("/api/stats")
@@ -160,6 +174,48 @@ def complete_goal_endpoint(entry_id: int, user_id: str = "default"):
 @app.get("/api/digest")
 def digest_endpoint(user_id: str = "default"):
     return checkin_store.get_digest(user_id)
+
+
+@app.get("/api/concept/{entity_id}")
+def concept_detail_endpoint(entity_id: int, user_id: str = "default"):
+    detail = store.get_concept_detail(entity_id, user_id)
+    if not detail:
+        return {"error": "Concept not found"}, 404
+    return detail
+
+
+@app.post("/api/notes")
+def create_note(req: NoteRequest):
+    return store.insert_note(req.user_id, req.content, req.entity_id, req.article_id)
+
+
+@app.get("/api/notes")
+def list_notes(entity_id: int | None = None, article_id: int | None = None, user_id: str = "default"):
+    if entity_id is not None:
+        return {"notes": store.get_notes_for_entity(entity_id)}
+    if article_id is not None:
+        return {"notes": store.get_notes_for_article(article_id)}
+    return {"notes": []}
+
+
+@app.delete("/api/notes/{note_id}")
+def delete_note_endpoint(note_id: int, user_id: str = "default"):
+    success = store.delete_note(note_id, user_id)
+    return {"deleted": success}
+
+
+# --- Communities ---
+
+@app.post("/api/communities/rebuild")
+def rebuild_communities_endpoint(user_id: str = "default"):
+    from kuro.memory.communities import rebuild_communities
+    return rebuild_communities(user_id)
+
+
+@app.get("/api/communities")
+def list_communities_endpoint(user_id: str = "default"):
+    from kuro.memory.communities import get_communities
+    return {"communities": get_communities(user_id)}
 
 
 # --- Voice Agent (Pipecat SmallWebRTC) ---

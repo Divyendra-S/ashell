@@ -370,9 +370,13 @@ def update_user_profile(user_id: str, content: str) -> str:
 
 # --- Dashboard / Graph / Stats ---
 
-def get_full_graph(user_id: str = "default") -> dict:
-    """Return all entities and relations for a user, deduped by case-insensitive name."""
-    raw_entities = supabase.table("entities").select("id, name, entity_type, summary").eq("user_id", user_id).execute().data
+def get_full_graph(user_id: str = "default", entity_types: list[str] | None = None) -> dict:
+    """Return entities and relations for a user, deduped by case-insensitive name."""
+    raw_entities = supabase.table("entities").select("id, name, entity_type, summary, community_id").eq("user_id", user_id).execute().data
+
+    # Filter by entity type if specified
+    if entity_types:
+        raw_entities = [e for e in raw_entities if e["entity_type"] in entity_types]
 
     # Get fact counts per entity
     for e in raw_entities:
@@ -524,3 +528,90 @@ def list_articles_enhanced(user_id: str = "default") -> list[dict]:
         chunks = supabase.table("article_chunks").select("id").eq("article_id", a["id"]).execute().data
         a["chunk_count"] = len(chunks)
     return articles
+
+
+# --- Notes ---
+
+def insert_note(user_id: str, content: str, entity_id: int | None = None, article_id: int | None = None) -> dict:
+    """Insert a note attached to an entity and/or article."""
+    row = {"user_id": user_id, "content": content}
+    if entity_id is not None:
+        row["entity_id"] = entity_id
+    if article_id is not None:
+        row["article_id"] = article_id
+    return supabase.table("notes").insert(row).execute().data[0]
+
+
+def get_notes_for_entity(entity_id: int) -> list[dict]:
+    return supabase.table("notes").select("*").eq("entity_id", entity_id).order("created_at", desc=True).execute().data
+
+
+def get_notes_for_article(article_id: int) -> list[dict]:
+    return supabase.table("notes").select("*").eq("article_id", article_id).order("created_at", desc=True).execute().data
+
+
+def delete_note(note_id: int, user_id: str) -> bool:
+    result = supabase.table("notes").delete().eq("id", note_id).eq("user_id", user_id).execute()
+    return len(result.data) > 0
+
+
+# --- Entity Passages ---
+
+def insert_entity_passage(entity_id: int, article_id: int, content: str, user_id: str = "default") -> dict:
+    """Store a passage from an article linked to an entity."""
+    return supabase.table("entity_passages").insert({
+        "entity_id": entity_id,
+        "article_id": article_id,
+        "content": content,
+        "user_id": user_id,
+    }).execute().data[0]
+
+
+def get_passages_for_entity(entity_id: int) -> list[dict]:
+    """Get all passages for an entity with joined article info."""
+    return supabase.table("entity_passages").select("*, articles(id, title, url)").eq("entity_id", entity_id).order("created_at", desc=True).execute().data
+
+
+# --- Concept Detail (aggregated) ---
+
+def get_concept_detail(entity_id: int, user_id: str = "default") -> dict | None:
+    """Aggregated concept view: entity + facts + relations + notes + learning entries + related articles."""
+    base = get_entity_detail(entity_id, user_id)
+    if not base:
+        return None
+
+    # Notes
+    base["notes"] = get_notes_for_entity(entity_id)
+
+    # Learning entries from voice check-ins matching this concept name
+    entity_name = base["name"]
+    try:
+        learning = supabase.table("checkin_entries").select("id, content, created_at").eq("user_id", user_id).eq("entry_type", "learning").ilike("content", f"%{entity_name}%").order("created_at", desc=True).limit(20).execute().data
+    except Exception:
+        learning = []
+    base["learning_entries"] = learning
+
+    # Related articles — find article_chunks mentioning this concept, resolve to articles
+    try:
+        chunks = supabase.table("article_chunks").select("article_id").eq("user_id", user_id).ilike("content", f"%{entity_name}%").limit(50).execute().data
+        article_ids = list({c["article_id"] for c in chunks})
+        if article_ids:
+            articles = supabase.table("articles").select("id, title, url").in_("id", article_ids).execute().data
+        else:
+            articles = []
+    except Exception:
+        articles = []
+    base["related_articles"] = articles
+
+    # Passages from articles
+    base["passages"] = get_passages_for_entity(entity_id)
+
+    # Community info
+    community_id = base.get("community_id")
+    if community_id:
+        comm = supabase.table("communities").select("id, name, summary").eq("id", community_id).execute()
+        base["community"] = comm.data[0] if comm.data else None
+    else:
+        base["community"] = None
+
+    return base

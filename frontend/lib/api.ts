@@ -16,6 +16,7 @@ export interface GraphEntity {
   entity_type: string;
   summary: string | null;
   fact_count: number;
+  community_id: number | null;
 }
 
 export interface GraphRelation {
@@ -84,6 +85,30 @@ export interface StreakData {
   total_active_days: number;
 }
 
+export interface Note {
+  id: number;
+  content: string;
+  entity_id: number | null;
+  article_id: number | null;
+  created_at: string;
+}
+
+export interface Passage {
+  id: number;
+  entity_id: number;
+  article_id: number;
+  content: string;
+  created_at: string;
+  articles: { id: number; title: string; url: string | null } | null;
+}
+
+export interface ConceptDetail extends EntityDetail {
+  notes: Note[];
+  learning_entries: { id: number; content: string; created_at: string }[];
+  related_articles: { id: number; title: string; url: string | null }[];
+  passages: Passage[];
+}
+
 export interface DigestData {
   streak: StreakData;
   recent_entities: { name: string; entity_type: string }[];
@@ -96,9 +121,20 @@ export interface DigestData {
 const API = "/api";
 
 async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, init);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
+  const maxRetries = init?.method === "POST" ? 0 : 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(`${API}${path}`, init);
+      if (res.ok) return res.json();
+      if (res.status < 500 || attempt === maxRetries) {
+        throw new Error(`API error: ${res.status}`);
+      }
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+    }
+    await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+  }
+  throw new Error("API request failed");
 }
 
 export async function sendMessage(text: string, userId: string, skill?: string): Promise<ChatResponse> {
@@ -153,4 +189,25 @@ export async function completeGoal(entryId: number, userId: string): Promise<voi
 
 export async function getDigest(userId: string): Promise<DigestData> {
   return fetchJSON<DigestData>(`/digest?user_id=${userId}`);
+}
+
+export async function getConceptDetail(entityId: number, userId: string): Promise<ConceptDetail> {
+  return fetchJSON<ConceptDetail>(`/concept/${entityId}?user_id=${userId}`);
+}
+
+export async function createNote(userId: string, content: string, entityId?: number, articleId?: number): Promise<Note> {
+  return fetchJSON<Note>("/notes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_id: userId,
+      content,
+      entity_id: entityId ?? null,
+      article_id: articleId ?? null,
+    }),
+  });
+}
+
+export async function deleteNote(noteId: number, userId: string): Promise<void> {
+  await fetchJSON(`/notes/${noteId}?user_id=${userId}`, { method: "DELETE" });
 }

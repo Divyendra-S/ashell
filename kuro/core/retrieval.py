@@ -145,3 +145,68 @@ def rrf_merge(results: list[dict], top_k: int = 8, k: int = 60) -> list[dict]:
 
 def _metadata_count(r: dict) -> int:
     return sum(1 for v in r.values() if v is not None)
+
+
+def graph_retrieve(user_text: str, user_id: str = "default") -> list[dict]:
+    """Match entities from query via FTS, pull 1-hop neighborhood as structured context."""
+    results = []
+
+    # Find matching entities via FTS
+    matched_entities = store.search_entities(user_text, user_id=user_id)
+    if not matched_entities:
+        return results
+
+    seen_communities = set()
+    for entity in matched_entities[:3]:
+        eid = entity["id"]
+        name = entity["name"]
+
+        # Get top facts
+        facts = store.get_facts_for_entity(eid)
+        fact_texts = [f["content"] for f in facts[:5]]
+
+        # Get relations (1-hop neighborhood)
+        relations = store.get_relations_for_entity_enriched(eid)
+        rel_texts = []
+        for r in relations[:8]:
+            src = r.get("source_name", "?")
+            tgt = r.get("target_name", "?")
+            rtype = r.get("relation_type", "related_to")
+            rel_texts.append(f"{src} --[{rtype}]--> {tgt}")
+
+        # Build graph neighborhood context
+        content_parts = []
+        if fact_texts:
+            content_parts.append("Facts: " + "; ".join(fact_texts))
+        if rel_texts:
+            content_parts.append("Connections: " + "; ".join(rel_texts))
+
+        results.append({
+            "key": f"graph:{name}",
+            "type": "graph_neighborhood",
+            "title": name,
+            "content": "\n".join(content_parts),
+            "entity_type": entity.get("entity_type"),
+            "rank": 0,
+            "source": "graph",
+            "similarity": None,
+        })
+
+        # Community summary (deduplicated)
+        community_id = entity.get("community_id")
+        if community_id and community_id not in seen_communities:
+            seen_communities.add(community_id)
+            comm = store.supabase.table("communities").select("name, summary").eq("id", community_id).execute()
+            if comm.data:
+                c = comm.data[0]
+                results.append({
+                    "key": f"community:{community_id}",
+                    "type": "community_summary",
+                    "title": c.get("name", ""),
+                    "content": c.get("summary", ""),
+                    "rank": 0,
+                    "source": "graph",
+                    "similarity": None,
+                })
+
+    return results

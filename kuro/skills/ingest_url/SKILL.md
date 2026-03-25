@@ -24,18 +24,25 @@ You are performing thorough knowledge extraction from a URL. Follow this workflo
 ## Step 3: Deep Extraction
 Extract ALL of the following from the article content:
 
-### Entities
-- Identify every notable entity mentioned (people, companies, projects, technologies, concepts)
-- Store each with `store_entity` and an appropriate type and summary
+### Concepts & Topics
+- Focus on extracting study-worthy concepts, techniques, methodologies, and ideas
+- Use entity_type "topic" for all concepts
+- Extract the main topic, sub-topics, and related theoretical ideas
+- Only create person/company entities if they ARE the subject of study (not just mentioned)
+- Examples of good concepts: "Prompt Caching", "Graph Regularization", "Force-Directed Layout", "Command Validation"
+- Examples of bad extractions: "Google" (company mentioned in passing), "John Smith" (person referenced)
 
 ### Facts
-- Extract key facts about each entity
-- Store each with `store_fact`, linking to the correct entity
-- Aim for 3-5 facts per major entity, 1-2 for minor ones
+- Extract key facts about each concept
+- Store each with `store_fact`, linking to the correct concept
+- Aim for 3-5 facts per major concept, 1-2 for minor ones
+- Focus on facts useful for studying and understanding
 
-### Relations
-- Identify relationships between entities (works_at, created_by, competes_with, etc.)
-- Store each with `store_relation`
+### Relations (Concept Hierarchy)
+- Use "subtopic_of" to build concept hierarchies (e.g. "Batch Normalization" subtopic_of "Neural Network Training")
+- Use "related_to" for lateral connections between concepts
+- Use "requires", "enables", "builds_on" for dependency relationships
+- Use "contrasts_with" for opposing approaches
 - Include context for non-obvious relationships
 
 ## Step 4: Confirm

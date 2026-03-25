@@ -8,11 +8,39 @@ from kuro.skills import read_skill_data, append_skill_data
 log = logging.getLogger("kuro.ingest")
 
 SYSTEM_PROMPT = (
-    "You are a knowledge extraction agent. Extract entities, facts, and relations "
-    "from user input. Use the provided tools to store them. After storing, confirm "
-    "what you saved in a brief summary. "
-    "If the user provides a URL, use scrape_url to fetch it, then save_article to "
-    "store it, then extract key concepts as entities and facts using the existing tools."
+    "You are a knowledge extraction agent for a personal learning system. "
+    "Your goal is to extract concepts that are genuinely useful for studying and understanding.\n\n"
+
+    "## Extraction Process\n"
+    "1. First, use scrape_url (if given a URL), then save_article.\n"
+    "2. Read the full article carefully. Identify 3-8 key concepts worth studying.\n"
+    "3. For EACH concept, call in order:\n"
+    "   a) store_entity — with a rich 2-3 sentence summary\n"
+    "   b) store_fact (1-3 per concept) — each an explanatory paragraph, not a bare claim\n"
+    "   c) store_passage (1-2 per concept) — the relevant paragraph(s) from the article verbatim\n"
+    "   d) store_relation — connect concepts to each other with context\n\n"
+
+    "## Quality Standards\n"
+    "- SUMMARIES: 2-3 sentences. What it is, why it matters, when you'd use it. "
+    "Bad: 'A design technique.' "
+    "Good: 'A design strategy that reveals information progressively as users need it, "
+    "reducing cognitive load. Commonly used in onboarding flows and documentation.'\n"
+    "- FACTS: Self-contained explanatory paragraph (3-5 sentences). Include reasoning, "
+    "an example from the article, and why it matters. "
+    "Bad: 'X reduces cognitive load.' "
+    "Good: 'X reduces cognitive load by hiding advanced options until the user signals "
+    "readiness. For example, [specific example from article]. This resulted in [outcome].'\n"
+    "- PASSAGES: Copy 1-3 relevant paragraphs from the article that best explain this concept. "
+    "Direct quotes or close paraphrases a learner would want to re-read.\n"
+    "- RELATIONS: Always populate context — explain WHY these concepts are related.\n\n"
+
+    "## Entity Rules\n"
+    "- Use entity_type 'topic' for study-worthy concepts. Only use 'person', 'company', etc. "
+    "when the entity itself IS the subject of study.\n"
+    "- Prioritize abstract concepts, techniques, methodologies over proper nouns.\n"
+    "- Relation types: subtopic_of, related_to, requires, enables, contrasts_with, "
+    "builds_on, part_of, example_of.\n\n"
+    "After all extractions, confirm what you saved."
 )
 
 TOOLS = [
@@ -20,7 +48,7 @@ TOOLS = [
         "functionDeclarations": [
             {
                 "name": "store_entity",
-                "description": "Store an entity (person, company, project, etc.) in the knowledge base.",
+                "description": "Store a concept or topic in the knowledge base. Prefer type 'topic' for study-worthy concepts.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -30,7 +58,7 @@ TOOLS = [
                             "description": "Type of entity",
                             "enum": ["person", "company", "project", "topic", "place", "event"],
                         },
-                        "summary": {"type": "string", "description": "Brief description of the entity"},
+                        "summary": {"type": "string", "description": "2-3 sentences: what it is, why it matters, and when/where it's used."},
                     },
                     "required": ["name", "entity_type"],
                 },
@@ -42,7 +70,7 @@ TOOLS = [
                     "type": "object",
                     "properties": {
                         "entity_name": {"type": "string", "description": "Name of the entity this fact is about"},
-                        "content": {"type": "string", "description": "The fact content"},
+                        "content": {"type": "string", "description": "A self-contained explanatory paragraph (3-5 sentences). Include reasoning, examples, and significance."},
                     },
                     "required": ["entity_name", "content"],
                 },
@@ -54,9 +82,9 @@ TOOLS = [
                     "type": "object",
                     "properties": {
                         "source_name": {"type": "string", "description": "Name of the source entity"},
-                        "relation_type": {"type": "string", "description": "Type of relationship (e.g. works_at, knows, manages)"},
+                        "relation_type": {"type": "string", "description": "Type of relationship (e.g. subtopic_of, related_to, requires, enables, builds_on, contrasts_with, part_of, example_of)"},
                         "target_name": {"type": "string", "description": "Name of the target entity"},
-                        "context": {"type": "string", "description": "Additional context about the relationship"},
+                        "context": {"type": "string", "description": "Explain WHY these concepts are related (1-2 sentences). Always populate this field."},
                     },
                     "required": ["source_name", "relation_type", "target_name"],
                 },
@@ -95,6 +123,19 @@ TOOLS = [
                         "url": {"type": "string", "description": "Source URL of the article"},
                     },
                     "required": ["title", "content"],
+                },
+            },
+            {
+                "name": "store_passage",
+                "description": "Store a relevant passage from the article that explains a concept. Extract 1-2 key paragraphs per concept.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "entity_name": {"type": "string", "description": "Name of the entity this passage explains"},
+                        "article_id": {"type": "integer", "description": "The article_id returned by save_article"},
+                        "content": {"type": "string", "description": "The relevant paragraph(s) from the article, quoted or closely paraphrased. 2-8 sentences explaining this concept in context."},
+                    },
+                    "required": ["entity_name", "article_id", "content"],
                 },
             },
         ]
@@ -166,6 +207,13 @@ def _make_tool_executor(user_id: str):
                 store.update_chunk_embedding(chunk_row["id"], emb)
             return json.dumps({"file_path": file_path, "article_id": row["id"],
                                 "chunks": len(chunks), "embeddings_stored": len(embeddings)})
+
+        elif name == "store_passage":
+            entity = _resolve_entity(args["entity_name"], user_id=user_id)
+            result = store.insert_entity_passage(
+                entity["id"], args["article_id"], args["content"], user_id=user_id,
+            )
+            return json.dumps({"status": "ok", "passage": result}, default=str)
 
         return f"Unknown tool: {name}"
 

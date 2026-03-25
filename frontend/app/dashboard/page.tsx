@@ -85,7 +85,7 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        {activeTab === "graph" && <KnowledgeGraph data={graphData} />}
+        {activeTab === "graph" && <KnowledgeGraph data={graphData} userId={userId} />}
         {activeTab === "articles" && (
           <div className="mx-auto max-w-6xl">
             <ArticlesLibrary articles={articles} />
