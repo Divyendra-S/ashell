@@ -33,6 +33,7 @@ export default function DashboardPage() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [articleError, setArticleError] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("graph");
+  const [articleFilter, setArticleFilter] = useState<"all" | "unread" | "read">("all");
 
   useEffect(() => {
     if (!userId) {
@@ -73,7 +74,7 @@ export default function DashboardPage() {
               <motion.div
                 layoutId="tab-indicator"
                 className="absolute inset-0 rounded-full bg-accent/90"
-                style={{ boxShadow: "0 0 16px -4px rgba(129, 140, 248, 0.3)" }}
+                style={{ boxShadow: "0 0 16px -4px rgba(var(--gradient-accent-rgb), 0.3)" }}
                 transition={{ type: "spring", damping: 25, stiffness: 300 }}
               />
             )}
@@ -91,7 +92,7 @@ export default function DashboardPage() {
         {activeTab === "graph" ? (
           <motion.div
             key="graph"
-            initial={{ opacity: 0 }}
+            initial={false}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
@@ -109,7 +110,38 @@ export default function DashboardPage() {
             className="h-full overflow-y-auto px-6 pt-16 pb-8"
           >
             <div className="mx-auto max-w-7xl">
-              <ArticlesLibrary articles={articles} />
+              {articles.length > 0 && (
+                <div className="mb-5 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-[14px] font-light text-text-primary">Your Library</h2>
+                    <span className="text-[11px] text-text-tertiary">{articles.length} articles</span>
+                  </div>
+                  <div className="flex gap-1 rounded-full border border-surface-2/30 p-[2px]">
+                    {(["all", "unread", "read"] as const).map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => setArticleFilter(f)}
+                        className={`rounded-full px-3 py-1 text-[11px] capitalize transition-all duration-200 ${
+                          articleFilter === f
+                            ? "bg-accent/10 font-medium text-accent"
+                            : "text-text-tertiary hover:text-text-secondary"
+                        }`}
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <ArticlesLibrary
+                articles={
+                  articleFilter === "all"
+                    ? articles
+                    : articles.filter((a) =>
+                        articleFilter === "read" ? a.is_read : !a.is_read
+                      )
+                }
+              />
             </div>
           </motion.div>
         )}

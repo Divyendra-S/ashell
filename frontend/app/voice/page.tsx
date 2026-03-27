@@ -2,11 +2,19 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import { useUser } from "../../lib/user";
 import { PipecatClient } from "@pipecat-ai/client-js";
 import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
 
 type ConnectionState = "idle" | "connecting" | "connected" | "disconnecting" | "error";
+
+const TIPS = [
+  "Tell Kuro about what you learned today",
+  "Reflect on your goals and progress",
+  "Share an idea you've been thinking about",
+  "Summarize an article you just read",
+];
 
 export default function VoicePage() {
   const { userId } = useUser();
@@ -14,6 +22,7 @@ export default function VoicePage() {
   const [state, setState] = useState<ConnectionState>("idle");
   const [isMuted, setIsMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tipIndex, setTipIndex] = useState(0);
   const clientRef = useRef<PipecatClient | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -24,6 +33,15 @@ export default function VoicePage() {
   useEffect(() => {
     return () => { clientRef.current?.disconnect(); };
   }, []);
+
+  // Cycle tips every 4s when idle
+  useEffect(() => {
+    if (state !== "idle") return;
+    const interval = setInterval(() => {
+      setTipIndex((prev) => (prev + 1) % TIPS.length);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [state]);
 
   const connect = useCallback(async () => {
     if (!userId) return;
@@ -77,12 +95,17 @@ export default function VoicePage() {
   const isListening = state === "connected" && !isMuted;
 
   return (
-    <div className="gradient-page flex h-full flex-col bg-surface-0 text-text-primary">
+    <div className="gradient-page relative flex h-full flex-col bg-surface-0 text-text-primary">
       <audio ref={audioRef} autoPlay />
       <main className="flex flex-1 flex-col items-center justify-center px-6">
         <div className="flex flex-col items-center gap-10">
           {/* Status */}
-          <div className="text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
+            className="text-center"
+          >
             <h2 className="text-xl font-extralight tracking-tight text-text-primary">
               {state === "idle" && "Daily Check-in"}
               {state === "connecting" && "Connecting..."}
@@ -97,10 +120,20 @@ export default function VoicePage() {
               {state === "disconnecting" && "Saving your session..."}
               {state === "error" && (error || "Something went wrong")}
             </p>
-          </div>
+          </motion.div>
 
-          {/* Mic button */}
-          <div className="relative">
+          {/* Mic button with decorative rings */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.4, delay: 0.08, ease: "easeOut" }}
+            className="relative flex items-center justify-center"
+          >
+            {/* Decorative concentric rings */}
+            <div className="pointer-events-none absolute h-40 w-40 rounded-full border border-surface-2/10" />
+            <div className="pointer-events-none absolute h-60 w-60 rounded-full border border-surface-2/[0.06]" />
+            <div className="pointer-events-none absolute h-80 w-80 rounded-full border border-surface-2/[0.03]" />
+
             {isListening && (
               <>
                 <div className="absolute inset-0 -m-5 animate-ping rounded-full bg-accent/15" style={{ animationDuration: "2s" }} />
@@ -112,7 +145,7 @@ export default function VoicePage() {
               disabled={state === "connecting" || state === "disconnecting"}
               className={`relative z-10 flex h-24 w-24 items-center justify-center rounded-full transition-all duration-300 ${
                 isListening
-                  ? "bg-accent text-white shadow-[0_0_40px_-8px_rgba(129,140,248,0.4)]"
+                  ? "bg-accent text-white shadow-[0_0_40px_-8px_rgba(var(--gradient-accent-rgb),0.4)]"
                   : state === "connected" && isMuted
                     ? "bg-surface-1/60 text-text-tertiary"
                     : state === "connecting"
@@ -135,7 +168,7 @@ export default function VoicePage() {
                 </svg>
               )}
             </button>
-          </div>
+          </motion.div>
 
           {/* End session / Try again */}
           {state === "connected" && (
@@ -154,8 +187,31 @@ export default function VoicePage() {
               Try Again
             </button>
           )}
+
+          {/* Cycling tips — idle state only */}
+          {state === "idle" && (
+            <div className="h-6">
+              <AnimatePresence mode="wait">
+                <motion.p
+                  key={tipIndex}
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.3 }}
+                  className="text-center text-[12px] italic text-text-tertiary"
+                >
+                  &ldquo;{TIPS[tipIndex]}&rdquo;
+                </motion.p>
+              </AnimatePresence>
+            </div>
+          )}
         </div>
       </main>
+
+      {/* Bottom reassurance */}
+      <p className="pb-5 text-center text-[10px] text-text-tertiary">
+        Sessions are transcribed and added to your knowledge base
+      </p>
     </div>
   );
 }

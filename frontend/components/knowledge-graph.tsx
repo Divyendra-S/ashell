@@ -3,6 +3,7 @@
 import { useCallback, useRef, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
+import { useTheme } from "../lib/theme";
 import type { GraphData, ConceptDetail, Stats } from "../lib/api";
 import { getConceptDetail, createNote, deleteNote } from "../lib/api";
 
@@ -181,10 +182,13 @@ export function KnowledgeGraph({
   userId: string;
   stats: Stats | null;
 }) {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+  const hasInteracted = useRef(false);
 
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const [conceptDetail, setConceptDetail] = useState<ConceptDetail | null>(null);
@@ -233,6 +237,7 @@ export function KnowledgeGraph({
   const handleNodeClick = useCallback(
     (node: any) => {
       if (!node?.id) return;
+      hasInteracted.current = true;
       focusNode(node);
       setSelectedNodeId(node.id);
       setNoteText("");
@@ -248,7 +253,9 @@ export function KnowledgeGraph({
   }, []);
 
   const handleEngineStop = useCallback(() => {
-    graphRef.current?.zoomToFit(400, 60);
+    if (!hasInteracted.current) {
+      graphRef.current?.zoomToFit(400, 60);
+    }
   }, []);
 
   const handleNodeHover = useCallback((node: any) => {
@@ -321,12 +328,12 @@ export function KnowledgeGraph({
         ctx.textBaseline = "top";
         ctx.fillStyle =
           isHovered || isSelected
-            ? "rgba(250, 250, 250, 0.95)"
-            : "rgba(250, 250, 250, 0.6)";
+            ? isDark ? "rgba(250, 250, 250, 0.95)" : "rgba(20, 20, 30, 0.95)"
+            : isDark ? "rgba(250, 250, 250, 0.6)" : "rgba(20, 20, 30, 0.55)";
         ctx.fillText(node.name, node.x, node.y + size + 3);
       }
     },
-    [hoveredNode, selectedNodeId]
+    [hoveredNode, selectedNodeId, isDark]
   );
 
   const nodePointerAreaPaint = useCallback(
@@ -343,13 +350,37 @@ export function KnowledgeGraph({
     return (
       <div
         ref={containerRef}
-        className="flex h-full items-center justify-center bg-surface-0"
+        className="gradient-page flex h-full items-center justify-center bg-surface-0"
       >
-        <p className="text-[13px] text-text-tertiary">
-          {data
-            ? "No concepts yet. Ingest an article to build your knowledge graph."
-            : "Loading graph..."}
-        </p>
+        <div className="flex flex-col items-center text-center">
+          {data ? (
+            <>
+              <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-accent/8">
+                <span className="text-2xl font-extralight text-accent">K</span>
+              </div>
+              <p className="mb-2 text-[14px] font-light text-text-secondary">
+                Your knowledge graph is empty
+              </p>
+              <p className="mb-5 max-w-xs text-[12px] text-text-tertiary">
+                Ingest an article or chat with Kuro to start building your knowledge graph
+              </p>
+              <button
+                onClick={() => {
+                  sessionStorage.setItem("kuro_prefill", "/ingest-url ");
+                  window.location.href = "/";
+                }}
+                className="rounded-full border border-accent/20 bg-accent/5 px-5 py-2 text-[12px] text-accent transition-all duration-200 hover:border-accent/35 hover:bg-accent/10"
+              >
+                Ingest your first article
+              </button>
+            </>
+          ) : (
+            <div className="space-y-3">
+              <div className="mx-auto h-5 w-32 skeleton" />
+              <div className="mx-auto h-3 w-48 skeleton" />
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -401,22 +432,23 @@ export function KnowledgeGraph({
         </span>
       </motion.div>
 
+      {dimensions.width > 0 && dimensions.height > 0 && (
       <ForceGraph2D
         ref={graphRef}
         graphData={{ nodes, links }}
         width={dimensions.width}
         height={dimensions.height}
-        backgroundColor="#0c0c0f"
+        backgroundColor={isDark ? "#0c0c0f" : "#fafafa"}
         nodeRelSize={4}
         nodeVal="val"
         nodeCanvasObject={nodeCanvasObject}
         nodePointerAreaPaint={nodePointerAreaPaint}
-        linkColor={() => "rgba(161, 161, 170, 0.12)"}
+        linkColor={() => isDark ? "rgba(161, 161, 170, 0.12)" : "rgba(100, 100, 120, 0.15)"}
         linkWidth={0.6}
         linkLabel={(d: any) => d.label?.replace(/_/g, " ")}
         linkDirectionalArrowLength={3}
         linkDirectionalArrowRelPos={0.9}
-        linkDirectionalArrowColor={() => "rgba(161, 161, 170, 0.25)"}
+        linkDirectionalArrowColor={() => isDark ? "rgba(161, 161, 170, 0.25)" : "rgba(100, 100, 120, 0.3)"}
         onNodeClick={handleNodeClick}
         onNodeHover={handleNodeHover}
         onBackgroundClick={handleBackgroundClick}
@@ -429,6 +461,7 @@ export function KnowledgeGraph({
         enableZoomInteraction={true}
         enablePanInteraction={true}
       />
+      )}
 
       {/* Detail Panel — inset from top, rounded */}
       <AnimatePresence>
@@ -463,13 +496,13 @@ export function KnowledgeGraph({
             {panelLoading ? (
               <div className="gradient-panel flex-1 p-5">
                 <div className="space-y-3">
-                  <div className="h-5 w-36 animate-pulse rounded-md bg-surface-2/40" />
-                  <div className="h-3 w-56 animate-pulse rounded-md bg-surface-2/25" />
+                  <div className="h-5 w-36 skeleton" />
+                  <div className="h-3 w-56 skeleton" />
                 </div>
                 <div className="mt-6 space-y-2">
-                  <div className="h-2 w-20 animate-pulse rounded bg-surface-2/20" />
+                  <div className="h-2 w-20 skeleton" />
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-3 animate-pulse rounded bg-surface-2/12" style={{ animationDelay: `${i * 100}ms`, width: `${90 - i * 15}%` }} />
+                    <div key={i} className="h-3 skeleton" style={{ animationDelay: `${i * 100}ms`, width: `${90 - i * 15}%` }} />
                   ))}
                 </div>
               </div>
@@ -481,7 +514,7 @@ export function KnowledgeGraph({
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3, delay: 0.1 }}
                   className="shrink-0 px-5 pb-3 pt-4"
-                  style={{ background: "linear-gradient(180deg, rgba(129,140,248,0.03) 0%, transparent 100%)" }}
+                  style={{ background: `linear-gradient(180deg, rgba(var(--gradient-accent-rgb),0.03) 0%, transparent 100%)` }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <h3 className="text-[17px] font-light tracking-tight text-text-primary leading-snug">

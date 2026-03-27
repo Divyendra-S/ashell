@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { sendMessage, type ChatResponse } from "../lib/api";
+import { motion } from "framer-motion";
+import { sendMessage, getSkills, type ChatResponse, type SkillInfo } from "../lib/api";
 import { useUser } from "../lib/user";
 import { DigestCard } from "../components/digest-card";
 
@@ -19,18 +20,31 @@ const suggestions = [
   "Remember this for later",
 ];
 
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
+
 export default function Home() {
   const { userId } = useUser();
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const greeting = useMemo(() => getGreeting(), []);
 
   useEffect(() => {
     if (!userId) router.push("/login");
   }, [userId, router]);
+
+  useEffect(() => {
+    getSkills().then(setSkills).catch(() => {});
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -39,6 +53,13 @@ export default function Home() {
   useEffect(() => {
     const prefill = sessionStorage.getItem("kuro_prefill");
     if (prefill) { setInput(prefill); sessionStorage.removeItem("kuro_prefill"); }
+
+    const handlePrefill = (e: Event) => {
+      const text = (e as CustomEvent).detail;
+      if (text) setInput(text);
+    };
+    window.addEventListener("kuro:prefill", handlePrefill);
+    return () => window.removeEventListener("kuro:prefill", handlePrefill);
   }, []);
 
   useEffect(() => {
@@ -82,26 +103,51 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-surface-0 text-text-primary">
+    <div className="gradient-page flex h-full flex-col bg-surface-0 text-text-primary">
       {/* Messages */}
       <main className="flex-1 overflow-y-auto px-6 py-8">
         <div className="mx-auto max-w-3xl space-y-5">
           {messages.length === 0 && !loading ? (
-            <div className="flex animate-fade-in flex-col items-center justify-center pt-10 text-center">
-              <div className="mb-8 w-full">
+            <div className="flex flex-col items-center justify-center pt-10 text-center">
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+                className="mb-8 w-full"
+              >
                 <DigestCard userId={userId} />
-              </div>
+              </motion.div>
 
-              <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-full bg-accent/10">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.35, delay: 0.05, ease: "easeOut" }}
+                className="mb-5 flex h-11 w-11 items-center justify-center rounded-full bg-accent/10"
+              >
                 <span className="text-base font-light text-accent">K</span>
-              </div>
-              <h2 className="mb-1.5 text-lg font-extralight tracking-tight text-text-primary">
-                What would you like to know?
-              </h2>
-              <p className="mb-8 text-[13px] text-text-tertiary">
+              </motion.div>
+              <motion.h2
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: 0.1, ease: "easeOut" }}
+                className="mb-1.5 text-lg font-extralight tracking-tight text-text-primary"
+              >
+                {greeting}
+              </motion.h2>
+              <motion.p
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: 0.15, ease: "easeOut" }}
+                className="mb-8 text-[13px] text-text-tertiary"
+              >
                 Ask a question or share knowledge to remember
-              </p>
-              <div className="flex flex-wrap justify-center gap-2">
+              </motion.p>
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: 0.2, ease: "easeOut" }}
+                className="flex flex-wrap justify-center gap-2"
+              >
                 {suggestions.map((s) => (
                   <button
                     key={s}
@@ -111,7 +157,42 @@ export default function Home() {
                     {s}
                   </button>
                 ))}
-              </div>
+              </motion.div>
+
+              {/* Skill shortcuts */}
+              {skills.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.35, delay: 0.25, ease: "easeOut" }}
+                  className="mt-8 w-full max-w-lg"
+                >
+                  <p className="mb-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
+                    Skills
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-1.5">
+                    {skills.map((s) => (
+                      <button
+                        key={s.name}
+                        onClick={() => setInput(`/${s.name} `)}
+                        className="rounded-full border border-accent/15 bg-accent/5 px-3 py-1.5 text-[11px] text-accent transition-all duration-200 hover:border-accent/30 hover:bg-accent/10"
+                      >
+                        /{s.name}
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Keyboard hint */}
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.4, delay: 0.35 }}
+                className="mt-10 text-[10px] text-text-tertiary"
+              >
+                Enter to send · Shift+Enter for new line
+              </motion.p>
             </div>
           ) : (
             <>
@@ -176,7 +257,7 @@ export default function Home() {
         <div className="mx-auto max-w-3xl">
           <form
             onSubmit={handleSubmit}
-            className="flex items-end gap-3 rounded-2xl border border-surface-2/35 bg-surface-1/50 px-4 py-3 transition-all duration-200 focus-within:border-accent/25 focus-within:bg-surface-1/50"
+            className="flex items-end gap-3 rounded-2xl border border-surface-2/35 bg-surface-05 px-4 py-3 transition-all duration-200 focus-within:border-accent/25 focus-within:bg-surface-1"
           >
             <textarea
               ref={textareaRef}

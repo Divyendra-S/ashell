@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import { useUser } from "../../../lib/user";
-import { getEntityDetail, type EntityDetail, type GraphRelation } from "../../../lib/api";
+import { getEntityDetail, type EntityDetail } from "../../../lib/api";
 
 const TYPE_COLORS: Record<string, string> = {
   person: "bg-[#818cf8]/10 text-[#818cf8]/80",
@@ -49,8 +50,8 @@ export default function EntityPage({ params }: { params: Promise<{ id: string }>
     return (
       <div className="flex h-full items-center justify-center bg-surface-0">
         <div className="space-y-3 text-center">
-          <div className="mx-auto h-6 w-40 animate-pulse rounded-lg bg-surface-2/20" />
-          <div className="mx-auto h-3 w-24 animate-pulse rounded bg-surface-2/15" />
+          <div className="mx-auto h-6 w-40 skeleton" />
+          <div className="mx-auto h-3 w-24 skeleton" />
         </div>
       </div>
     );
@@ -71,13 +72,23 @@ export default function EntityPage({ params }: { params: Promise<{ id: string }>
 
   const typeBadge = TYPE_COLORS[entity.entity_type] || "bg-surface-2/30 text-text-tertiary";
 
+  const handleQuickAsk = (e: React.FormEvent) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const input = form.elements.namedItem("question") as HTMLInputElement;
+    const q = input.value.trim();
+    if (!q) return;
+    sessionStorage.setItem("kuro_prefill", q);
+    router.push("/");
+  };
+
   return (
     <div className="gradient-page flex h-full flex-col overflow-y-auto bg-surface-0 text-text-primary">
-      <div className="mx-auto w-full max-w-4xl space-y-8 px-6 py-8">
+      <div className="mx-auto w-full max-w-5xl px-6 py-8">
         {/* Back */}
         <button
           onClick={() => router.push("/dashboard")}
-          className="flex items-center gap-1 text-[11px] text-text-tertiary transition-colors duration-200 hover:text-text-secondary"
+          className="mb-6 flex items-center gap-1 text-[11px] text-text-tertiary transition-colors duration-200 hover:text-text-secondary"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <path d="M10 4L6 8L10 12" />
@@ -85,89 +96,160 @@ export default function EntityPage({ params }: { params: Promise<{ id: string }>
           Dashboard
         </button>
 
-        {/* Header */}
-        <div>
-          <div className="mb-2 flex items-center gap-3">
-            <h1 className="text-2xl font-extralight tracking-tight text-text-primary">{entity.name}</h1>
-            <span className={`rounded-full px-2.5 py-[3px] text-[10px] font-medium ${typeBadge}`}>
-              {entity.entity_type}
-            </span>
-          </div>
-          {entity.summary && (
-            <p className="text-[13px] leading-[1.7] text-text-secondary">{entity.summary}</p>
-          )}
-          <p className="mt-1.5 text-[11px] text-text-tertiary">Created {formatDate(entity.created_at)}</p>
-        </div>
+        <div className="grid gap-8 lg:grid-cols-[1fr_260px]">
+          {/* Main content */}
+          <div className="space-y-8">
+            {/* Header */}
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: "easeOut" }}
+            >
+              <div className="mb-2 flex items-center gap-3">
+                <h1 className="text-2xl font-extralight tracking-tight text-text-primary">{entity.name}</h1>
+                <span className={`rounded-full px-2.5 py-[3px] text-[10px] font-medium ${typeBadge}`}>
+                  {entity.entity_type}
+                </span>
+              </div>
+              {entity.summary && (
+                <p className="text-[13px] leading-[1.7] text-text-secondary">{entity.summary}</p>
+              )}
+            </motion.div>
 
-        {/* Facts — bullet list */}
-        <div>
-          <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
-            Facts ({entity.facts.length})
-          </h2>
-          {entity.facts.length > 0 ? (
-            <ul className="space-y-2">
-              {entity.facts.map((fact) => (
-                <li key={fact.id} className="flex gap-2.5 text-[13px] leading-[1.65] text-text-secondary">
-                  <span className="mt-[9px] h-[3px] w-[3px] shrink-0 rounded-full bg-accent/40" />
-                  <div>
-                    <span>{fact.content}</span>
-                    <span className="ml-2 text-[10px] text-text-tertiary">{fact.source} · {formatDate(fact.created_at)}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-[12px] text-text-tertiary">No facts recorded yet.</p>
-          )}
-        </div>
+            {/* Facts — bullet list */}
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, delay: 0.06, ease: "easeOut" }}
+            >
+              <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
+                Facts ({entity.facts.length})
+              </h2>
+              {entity.facts.length > 0 ? (
+                <ul className="space-y-2">
+                  {entity.facts.map((fact) => (
+                    <li key={fact.id} className="flex gap-2.5 text-[13px] leading-[1.65] text-text-secondary">
+                      <span className="mt-[9px] h-[3px] w-[3px] shrink-0 rounded-full bg-accent/40" />
+                      <div>
+                        <span>{fact.content}</span>
+                        <span className="ml-2 text-[10px] text-text-tertiary">{fact.source} · {formatDate(fact.created_at)}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-[12px] text-text-tertiary">No facts recorded yet.</p>
+              )}
+            </motion.div>
 
-        {/* Relations — pills */}
-        <div>
-          <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
-            Relations ({entity.relations.length})
-          </h2>
-          {entity.relations.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {entity.relations.map((rel) => {
-                const isSource = rel.source_id === entityId;
-                const otherName = isSource ? rel.target_name : rel.source_name;
-                const otherId = isSource ? rel.target_id : rel.source_id;
-                return (
+            {/* Relations — pills */}
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, delay: 0.12, ease: "easeOut" }}
+            >
+              <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
+                Relations ({entity.relations.length})
+              </h2>
+              {entity.relations.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {entity.relations.map((rel) => {
+                    const isSource = rel.source_id === entityId;
+                    const otherName = isSource ? rel.target_name : rel.source_name;
+                    const otherId = isSource ? rel.target_id : rel.source_id;
+                    return (
+                      <button
+                        key={rel.id}
+                        onClick={() => navigateToEntity(otherId)}
+                        className="flex items-center gap-1.5 rounded-full border border-surface-2/35 px-3 py-[5px] text-[11px] text-text-secondary transition-all duration-200 hover:border-accent/25 hover:text-accent/90"
+                      >
+                        <span className="text-text-tertiary">{rel.relation_type}</span>
+                        <span className="text-text-tertiary">·</span>
+                        <span className="font-medium">{otherName}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-[12px] text-text-tertiary">No relations yet.</p>
+              )}
+            </motion.div>
+
+            {/* Actions */}
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, delay: 0.18, ease: "easeOut" }}
+            >
+              <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Actions</h2>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { skill: "study", label: "Study this topic" },
+                  { skill: "explain", label: "Explain in depth" },
+                  { skill: "deep-research", label: "Deep research" },
+                ].map((action) => (
                   <button
-                    key={rel.id}
-                    onClick={() => navigateToEntity(otherId)}
-                    className="flex items-center gap-1.5 rounded-full border border-surface-2/35 px-3 py-[5px] text-[11px] text-text-secondary transition-all duration-200 hover:border-accent/25 hover:text-accent/90"
+                    key={action.skill}
+                    onClick={() => prefillChat(action.skill, entity.name)}
+                    className="rounded-full border border-surface-2/35 px-4 py-2 text-[12px] text-text-tertiary transition-all duration-200 hover:border-accent/25 hover:text-text-secondary"
                   >
-                    <span className="text-text-tertiary">{rel.relation_type}</span>
-                    <span className="text-text-tertiary">·</span>
-                    <span className="font-medium">{otherName}</span>
+                    {action.label}
                   </button>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-[12px] text-text-tertiary">No relations yet.</p>
-          )}
-        </div>
+                ))}
+              </div>
+            </motion.div>
 
-        {/* Actions */}
-        <div>
-          <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Actions</h2>
-          <div className="flex flex-wrap gap-2">
-            {[
-              { skill: "study", label: "Study this topic" },
-              { skill: "explain", label: "Explain in depth" },
-              { skill: "deep-research", label: "Deep research" },
-            ].map((action) => (
-              <button
-                key={action.skill}
-                onClick={() => prefillChat(action.skill, entity.name)}
-                className="rounded-full border border-surface-2/35 px-4 py-2 text-[12px] text-text-tertiary transition-all duration-200 hover:border-accent/25 hover:text-text-secondary"
-              >
-                {action.label}
-              </button>
-            ))}
+            {/* Quick ask */}
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, delay: 0.24, ease: "easeOut" }}
+            >
+              <form onSubmit={handleQuickAsk} className="flex gap-2">
+                <input
+                  name="question"
+                  type="text"
+                  placeholder={`Ask about ${entity.name}...`}
+                  className="flex-1 rounded-xl border border-surface-2/30 bg-surface-05 px-4 py-2.5 text-[13px] text-text-primary placeholder-text-tertiary outline-none transition-all duration-200 focus:border-accent/30 focus:bg-surface-1"
+                />
+                <button
+                  type="submit"
+                  className="shrink-0 rounded-xl bg-accent/10 px-4 py-2.5 text-[12px] font-medium text-accent transition-all duration-200 hover:bg-accent/20"
+                >
+                  Ask Kuro
+                </button>
+              </form>
+            </motion.div>
           </div>
+
+          {/* Sidebar — metadata card */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1, ease: "easeOut" }}
+            className="hidden lg:block"
+          >
+            <div className="sticky top-8 space-y-5 rounded-2xl border border-surface-2/30 bg-surface-05 p-5">
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Type</p>
+                <span className={`inline-block rounded-full px-2.5 py-[3px] text-[10px] font-medium ${typeBadge}`}>
+                  {entity.entity_type}
+                </span>
+              </div>
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Created</p>
+                <p className="text-[12px] text-text-secondary">{formatDate(entity.created_at)}</p>
+              </div>
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Facts</p>
+                <p className="text-[18px] font-extralight text-text-primary">{entity.facts.length}</p>
+              </div>
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Relations</p>
+                <p className="text-[18px] font-extralight text-text-primary">{entity.relations.length}</p>
+              </div>
+            </div>
+          </motion.div>
         </div>
       </div>
     </div>

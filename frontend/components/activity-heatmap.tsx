@@ -16,11 +16,11 @@ function getActivityMap(timeline: TimelineEntry[]): Map<string, number> {
 }
 
 function getColor(count: number): string {
-  if (count === 0) return "bg-surface-2/20";
-  if (count === 1) return "bg-accent/15";
-  if (count <= 3) return "bg-accent/30";
-  if (count <= 6) return "bg-accent/50";
-  return "bg-accent/70";
+  if (count === 0) return "bg-surface-2/30";
+  if (count === 1) return "bg-accent/20";
+  if (count <= 3) return "bg-accent/35";
+  if (count <= 6) return "bg-accent/55";
+  return "bg-accent/75";
 }
 
 export function ActivityHeatmap({ timeline }: { timeline: TimelineEntry[] }) {

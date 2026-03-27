@@ -5,9 +5,9 @@ import type { TimelineEntry } from "../lib/api";
 
 const TYPE_CONFIG: Record<string, { color: string; label: string }> = {
   checkin: { color: "bg-accent/15 text-accent", label: "Check-in" },
-  article: { color: "bg-mode-ingest/10 text-mode-ingest", label: "Article" },
-  entity: { color: "bg-mode-query/10 text-mode-query", label: "Entity" },
-  goal_set: { color: "bg-yellow-400/10 text-yellow-400/70", label: "Goal" },
+  article: { color: "bg-mode-ingest/15 text-mode-ingest", label: "Article" },
+  entity: { color: "bg-mode-query/15 text-mode-query", label: "Entity" },
+  goal_set: { color: "bg-amber-500/12 text-amber-600 dark:text-amber-400", label: "Goal" },
 };
 
 function formatDate(iso: string): string {

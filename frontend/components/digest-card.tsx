@@ -25,7 +25,7 @@ export function DigestCard({ userId }: { userId: string }) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-2xl animate-fade-in rounded-2xl border border-surface-2/35 bg-surface-1/45 p-5">
+    <div className="mx-auto w-full max-w-2xl rounded-2xl border border-surface-2/35 bg-surface-05 p-5">
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">

@@ -9,10 +9,6 @@ interface Goal {
   completed_at?: string | null;
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
 export function GoalTracker({
   pendingGoals,
   completedGoals,
@@ -30,39 +26,35 @@ export function GoalTracker({
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Pending */}
-      {pendingGoals.length > 0 ? (
-        <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Pending</p>
+      {pendingGoals.length > 0 && (
+        <div className="flex flex-wrap gap-2">
           {pendingGoals.map((g) => (
             <label
               key={g.id}
-              className="flex cursor-pointer items-start gap-2 text-[12px] text-text-secondary transition-colors hover:text-text-primary"
+              className="group flex cursor-pointer items-center gap-2 rounded-full border border-surface-2/30 px-3 py-1.5 text-[12px] text-text-secondary transition-all duration-200 hover:border-accent/25 hover:text-text-primary"
             >
               <input
                 type="checkbox"
                 onChange={() => handleComplete(g.id)}
-                className="mt-0.5 h-3 w-3 rounded border-surface-3/30 bg-transparent accent-accent"
+                className="h-3 w-3 rounded border-surface-3/30 bg-transparent accent-accent"
               />
-              <div>
-                <span>{g.content}</span>
-                <span className="ml-1.5 text-[10px] text-text-tertiary">{formatDate(g.created_at)}</span>
-              </div>
+              <span>{g.content}</span>
             </label>
           ))}
         </div>
-      ) : (
-        <p className="text-[11px] text-text-tertiary">No pending goals</p>
       )}
 
       {/* Completed */}
       {completedGoals.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Completed</p>
+        <div className="flex flex-wrap gap-2">
           {completedGoals.map((g) => (
-            <div key={g.id} className="flex items-start gap-2 text-[12px] text-text-tertiary line-through">
-              <input type="checkbox" checked disabled className="mt-0.5 h-3 w-3 rounded border-surface-3/20 bg-transparent accent-accent" />
+            <div
+              key={g.id}
+              className="flex items-center gap-2 rounded-full border border-surface-2/20 px-3 py-1.5 text-[12px] text-text-tertiary line-through"
+            >
+              <input type="checkbox" checked disabled className="h-3 w-3 rounded border-surface-3/20 bg-transparent accent-accent" />
               <span>{g.content}</span>
             </div>
           ))}
