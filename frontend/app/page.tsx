@@ -1,17 +1,21 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { sendMessage, getSkills, type ChatResponse, type SkillInfo } from "../lib/api";
+import { streamMessage, getSkills, type SkillInfo, type ToolStep } from "../lib/api";
 import { useUser } from "../lib/user";
 import { DigestCard } from "../components/digest-card";
+import { MarkdownContent } from "../components/markdown-content";
+import { ToolSteps } from "../components/tool-steps";
 
 interface Message {
   role: "user" | "kuro";
   text: string;
   mode?: "ingest" | "query";
   skill?: string;
+  steps?: ToolStep[];
+  streaming?: boolean;
 }
 
 const suggestions = [
@@ -36,6 +40,9 @@ export default function Home() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const deltaBufferRef = useRef("");
+  const rafRef = useRef<number>(0);
   const greeting = useMemo(() => getGreeting(), []);
 
   useEffect(() => {
@@ -71,32 +78,79 @@ export default function Home() {
 
   if (!userId) return null;
 
-  async function handleSubmit(e: React.FormEvent) {
+  const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
     if (!text || loading) return;
 
     let skill: string | undefined;
-    let cleanText = text;
     const slashMatch = text.match(/^\/(\S+)\s*([\s\S]*)/);
-    if (slashMatch) { skill = slashMatch[1]; cleanText = slashMatch[2]?.trim() || text; }
+    if (slashMatch) { skill = slashMatch[1]; }
 
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", text, skill }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text, skill },
+      { role: "kuro", text: "", steps: [], streaming: true },
+    ]);
     setLoading(true);
 
-    try {
-      const res: ChatResponse = await sendMessage(text, userId!, skill);
-      setMessages((prev) => [
-        ...prev,
-        { role: "kuro", text: res.response, mode: res.mode, skill: res.skill ?? undefined },
-      ]);
-    } catch (err) {
-      setMessages((prev) => [...prev, { role: "kuro", text: `Error: ${err}` }]);
-    } finally {
-      setLoading(false);
-    }
-  }
+    const updateLastMessage = (updater: (msg: Message) => Message) => {
+      setMessages((prev) => {
+        const msgs = [...prev];
+        msgs[msgs.length - 1] = updater({ ...msgs[msgs.length - 1] });
+        return msgs;
+      });
+    };
+
+    abortRef.current = streamMessage(text, userId!, skill, {
+      onStep: (step) => {
+        updateLastMessage((msg) => ({
+          ...msg,
+          steps: [...(msg.steps ?? []), step],
+        }));
+      },
+      onDelta: (delta) => {
+        deltaBufferRef.current += delta;
+        if (!rafRef.current) {
+          rafRef.current = requestAnimationFrame(() => {
+            const buffered = deltaBufferRef.current;
+            deltaBufferRef.current = "";
+            rafRef.current = 0;
+            updateLastMessage((msg) => ({ ...msg, text: msg.text + buffered }));
+          });
+        }
+      },
+      onDone: (meta) => {
+        if (deltaBufferRef.current) {
+          cancelAnimationFrame(rafRef.current);
+          const remaining = deltaBufferRef.current;
+          deltaBufferRef.current = "";
+          rafRef.current = 0;
+          updateLastMessage((msg) => ({ ...msg, text: msg.text + remaining }));
+        }
+        setTimeout(() => {
+          updateLastMessage((msg) => ({
+            ...msg,
+            streaming: false,
+            mode: meta.mode as "ingest" | "query",
+            skill: meta.skill ?? undefined,
+          }));
+          setLoading(false);
+          abortRef.current = null;
+        }, 0);
+      },
+      onError: (message) => {
+        updateLastMessage((msg) => ({
+          ...msg,
+          text: msg.text || `Error: ${message}`,
+          streaming: false,
+        }));
+        setLoading(false);
+        abortRef.current = null;
+      },
+    });
+  }, [input, loading, userId]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e); }
@@ -227,25 +281,29 @@ export default function Home() {
                         </span>
                       )}
                     </div>
-                    <p className="whitespace-pre-wrap text-[14px] leading-[1.7] text-text-primary">
-                      {msg.text}
-                    </p>
+                    {msg.role === "kuro" && (
+                      <ToolSteps steps={msg.steps} collapsed={!!msg.text} />
+                    )}
+                    {msg.role === "user" ? (
+                      <p className="whitespace-pre-wrap text-[14px] leading-[1.7] text-text-primary">
+                        {msg.text}
+                      </p>
+                    ) : (
+                      <>
+                        <MarkdownContent content={msg.text} streaming={msg.streaming} />
+                        {msg.streaming && !msg.text && (
+                          <span className="step-shimmer text-[13px]">
+                            {msg.steps && msg.steps.length > 0 ? "Searching..." : "Thinking..."}
+                          </span>
+                        )}
+                        {msg.streaming && msg.text && (
+                          <span className="inline-block h-4 w-0.5 animate-pulse bg-accent/60" />
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
-
-              {loading && (
-                <div className="flex animate-message-in items-start gap-3">
-                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/10 text-[10px] font-medium text-accent">
-                    K
-                  </div>
-                  <div className="flex items-center gap-1.5 pt-1.5">
-                    {[0, 200, 400].map((delay) => (
-                      <span key={delay} className="inline-block h-1 w-1 animate-dot-pulse rounded-full bg-text-tertiary/70" style={{ animationDelay: `${delay}ms` }} />
-                    ))}
-                  </div>
-                </div>
-              )}
             </>
           )}
           <div ref={bottomRef} />

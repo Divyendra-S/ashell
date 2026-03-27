@@ -1,7 +1,7 @@
 import json
 import logging
 
-from kuro.core.llm import run_agent_loop
+from kuro.core.llm import run_agent_loop, run_agent_loop_streaming
 from kuro.core.retrieval import rewrite_query, hybrid_retrieve, rrf_merge, graph_retrieve
 from kuro.memory import store
 from kuro.skills import get_skill, get_skill_index, get_skill_guards, read_skill_data, append_skill_data
@@ -473,3 +473,51 @@ def query(user_text: str, history: list[dict] | None = None, user_id: str = "def
         return run_agent_loop(contents, active_tools, combined_executor, system_instruction=system_prompt, guards=guards)
 
     return run_agent_loop(contents, active_tools, base_executor, system_instruction=system_prompt)
+
+
+def query_streaming(user_text: str, history: list[dict] | None = None, user_id: str = "default", skill: str | None = None):
+    """Streaming variant of query(). Yields ("step"|"delta", data) tuples."""
+    queries = rewrite_query(user_text)
+    log.info(f"Rewritten queries: {queries}")
+    raw = hybrid_retrieve(queries, user_id=user_id)
+    top = rrf_merge(raw, top_k=8)
+
+    graph_context = graph_retrieve(user_text, user_id=user_id)
+    top.extend(graph_context)
+
+    context = _format_context(top)
+
+    memories = store.get_top_memories(user_id, limit=10)
+    user_memory = _format_user_memory(memories)
+    user_profile = store.read_user_profile(user_id) or "No profile yet. Create one when you learn about this user."
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context, user_memory=user_memory, user_profile=user_profile)
+
+    system_prompt += "\n\n" + get_skill_index()
+
+    if skill:
+        skill_data = get_skill(skill)
+        if skill_data:
+            system_prompt += f"\n\n## Active Skill: /{skill_data['name']}\n{skill_data['body']}"
+
+    contents = history or []
+    contents.append({"role": "user", "parts": [{"text": user_text}]})
+
+    active_tools = list(TOOLS)
+    base_executor = _make_tool_executor(user_id)
+    guards = get_skill_guards(skill) if skill else None
+
+    if skill:
+        active_tools.extend(SKILL_DATA_TOOLS)
+        if skill in SKILL_HELPER_TOOLS:
+            active_tools.extend(SKILL_HELPER_TOOLS[skill])
+        skill_data_executor = _make_skill_data_executor(skill, user_id)
+
+        def combined_executor(name: str, args: dict) -> str:
+            result = skill_data_executor(name, args)
+            if result is not None:
+                return result
+            return base_executor(name, args)
+
+        yield from run_agent_loop_streaming(contents, active_tools, combined_executor, system_instruction=system_prompt, guards=guards)
+    else:
+        yield from run_agent_loop_streaming(contents, active_tools, base_executor, system_instruction=system_prompt)

@@ -4,10 +4,11 @@ import re
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from kuro.agents.ingest import ingest
-from kuro.agents.query import query
+from kuro.agents.ingest import ingest, ingest_streaming
+from kuro.agents.query import query, query_streaming
 from kuro.cli import classify, SLASH_CMD_PATTERN
 from kuro.memory import store, checkin_store
 from kuro.skills import load_skills, get_skill
@@ -90,6 +91,64 @@ def chat(req: ChatRequest):
             logging.getLogger("kuro.api").warning(f"Community rebuild failed: {e}")
 
     return {"response": response, "mode": mode, "skill": skill}
+
+
+@app.post("/api/chat/stream")
+def chat_stream(req: ChatRequest):
+    import json as _json
+
+    skill = req.skill
+    message = req.message
+
+    if skill:
+        slash = SLASH_CMD_PATTERN.match(message)
+        if slash:
+            message = slash.group(2).strip() or message
+        skill_data = get_skill(skill)
+        mode = skill_data.get("mode", "query") if skill_data else "query"
+    else:
+        mode, skill = classify(message)
+        if skill:
+            slash = SLASH_CMD_PATTERN.match(message)
+            if slash:
+                message = slash.group(2).strip() or message
+
+    def generate():
+        try:
+            if mode == "query":
+                stream = query_streaming(message, user_id=req.user_id, skill=skill)
+            else:
+                skill_instructions = None
+                if skill:
+                    sd = get_skill(skill)
+                    if sd:
+                        skill_instructions = f"## Active Skill: /{sd['name']}\n{sd['body']}"
+                stream = ingest_streaming(message, user_id=req.user_id, skill_instructions=skill_instructions, skill_name=skill)
+
+            for event_type, data in stream:
+                if event_type == "step":
+                    yield f"event: step\ndata: {_json.dumps(data)}\n\n"
+                elif event_type == "delta":
+                    yield f"event: delta\ndata: {_json.dumps({'text': data})}\n\n"
+
+            # After ingest, rebuild communities
+            if mode != "query":
+                try:
+                    from kuro.memory.communities import rebuild_communities
+                    rebuild_communities(req.user_id)
+                except Exception as e:
+                    logging.getLogger("kuro.api").warning(f"Community rebuild failed: {e}")
+
+            yield f"event: done\ndata: {_json.dumps({'mode': mode, 'skill': skill})}\n\n"
+        except Exception as e:
+            logging.getLogger("kuro.api").error(f"Stream error: {e}")
+            yield f"event: error\ndata: {_json.dumps({'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/ingest")

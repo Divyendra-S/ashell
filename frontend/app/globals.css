@@ -109,6 +109,31 @@
   }
 }
 
+/* Tool step shimmer — smooth text shine sweep left-to-right */
+.step-shimmer {
+  color: transparent;
+  background: linear-gradient(
+    -20deg,
+    var(--accent) 25%,
+    color-mix(in srgb, var(--accent), white 60%) 50%,
+    var(--accent) 75%
+  );
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: text-shine 3s linear infinite;
+}
+
+@keyframes text-shine {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
 .skeleton {
   position: relative;
   overflow: hidden;

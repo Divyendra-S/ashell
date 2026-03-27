@@ -1,10 +1,11 @@
+import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 
 import requests
 
-from kuro.config import GEMINI_API_KEY, GEMINI_API_URL
+from kuro.config import GEMINI_API_KEY, GEMINI_API_URL, GEMINI_STREAM_URL
 
 log = logging.getLogger("kuro.llm")
 
@@ -104,6 +105,114 @@ def run_agent_loop(
                     if blocked:
                         break
             result = blocked if blocked else tool_executor(name, args)
+
+            function_response_parts.append({
+                "functionResponse": {
+                    "name": name,
+                    "response": {"result": result},
+                }
+            })
+
+        contents.append({"role": "user", "parts": function_response_parts})
+
+
+def stream_gemini(
+    contents: list[dict],
+    tools: list[dict] | None = None,
+    system_instruction: str | None = None,
+) -> Generator[dict, None, None]:
+    """Stream from Gemini's SSE endpoint, yielding parsed JSON chunks."""
+    body: dict = {"contents": contents}
+    if tools:
+        body["tools"] = tools
+    if system_instruction:
+        body["system_instruction"] = {"parts": [{"text": system_instruction}]}
+
+    resp = requests.post(
+        GEMINI_STREAM_URL,
+        headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
+        json=body,
+        stream=True,
+    )
+    resp.raise_for_status()
+
+    for line in resp.iter_lines(decode_unicode=True):
+        if line and line.startswith("data: "):
+            try:
+                chunk = json.loads(line[6:])
+                yield chunk
+            except json.JSONDecodeError:
+                continue
+
+
+def run_agent_loop_streaming(
+    contents: list[dict],
+    tools: list[dict],
+    tool_executor: Callable[[str, dict], str],
+    system_instruction: str | None = None,
+    guards: list[Callable[[str, dict], str | None]] | None = None,
+) -> Generator[tuple[str, dict | str], None, None]:
+    """Streaming agent loop. Yields typed events:
+    - ("step", {"tool": name, "args": args, "status": "running"|"done"})
+    - ("delta", text_chunk)
+    """
+    while True:
+        start = time.time()
+        all_parts: list[dict] = []
+        pending_deltas: list[str] = []
+        has_function_calls = False
+
+        # Stream from Gemini — yield text deltas in real-time,
+        # but collect everything if function calls are detected
+        for chunk in stream_gemini(contents, tools=tools, system_instruction=system_instruction):
+            candidates = chunk.get("candidates", [])
+            if not candidates:
+                continue
+            parts = candidates[0].get("content", {}).get("parts", [])
+            for p in parts:
+                all_parts.append(p)
+                if "functionCall" in p:
+                    has_function_calls = True
+                elif "text" in p:
+                    if has_function_calls:
+                        # Rare: text mixed with function calls, just collect
+                        pending_deltas.append(p["text"])
+                    else:
+                        # Real-time: yield text delta immediately
+                        yield ("delta", p["text"])
+
+        log.info(f"Inference (stream): {time.time() - start:.2f}s")
+
+        if not has_function_calls:
+            # Final text response — all deltas already yielded above
+            contents.append({"role": "model", "parts": all_parts})
+            # Yield any pending deltas (shouldn't happen in practice)
+            for delta in pending_deltas:
+                yield ("delta", delta)
+            return
+
+        # Tool-call iteration — execute tools, yield step events
+        contents.append({"role": "model", "parts": all_parts})
+
+        function_calls = [p for p in all_parts if "functionCall" in p]
+        function_response_parts = []
+        for part in function_calls:
+            fc = part["functionCall"]
+            name = fc["name"]
+            args = fc.get("args", {})
+            log.info(f"Tool: {name}({args})")
+
+            yield ("step", {"tool": name, "args": args, "status": "running"})
+
+            blocked = None
+            if guards:
+                for guard in guards:
+                    blocked = guard(name, args)
+                    if blocked:
+                        break
+            result = blocked if blocked else tool_executor(name, args)
+
+            yield ("step", {"tool": name, "args": args, "status": "done"})
 
             function_response_parts.append({
                 "functionResponse": {

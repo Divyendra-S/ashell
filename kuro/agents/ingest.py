@@ -1,7 +1,7 @@
 import json
 import logging
 
-from kuro.core.llm import run_agent_loop
+from kuro.core.llm import run_agent_loop, run_agent_loop_streaming
 from kuro.memory import store
 from kuro.skills import read_skill_data, append_skill_data
 
@@ -277,3 +277,32 @@ def ingest(user_text: str, history: list[dict] | None = None, user_id: str = "de
         return run_agent_loop(contents, active_tools, combined_executor, system_instruction=system)
 
     return run_agent_loop(contents, active_tools, base_executor, system_instruction=system)
+
+
+def ingest_streaming(user_text: str, history: list[dict] | None = None, user_id: str = "default",
+                     skill_instructions: str | None = None, skill_name: str | None = None):
+    """Streaming variant of ingest(). Yields ("step"|"delta", data) tuples."""
+    system = SYSTEM_PROMPT
+    if skill_instructions:
+        system += "\n\n" + skill_instructions
+    contents = history or []
+    contents.append({"role": "user", "parts": [{"text": user_text}]})
+
+    active_tools = list(TOOLS)
+    base_executor = _make_tool_executor(user_id)
+
+    if skill_name:
+        active_tools.extend(SKILL_DATA_TOOLS)
+
+        def combined_executor(name: str, args: dict) -> str:
+            if name == "read_skill_data":
+                records = read_skill_data(skill_name, args["filename"], user_id=user_id)
+                return json.dumps({"records": records, "count": len(records)}, default=str)
+            elif name == "append_skill_data":
+                result = append_skill_data(skill_name, args["filename"], args["record"], user_id=user_id)
+                return json.dumps({"status": "saved", "message": result})
+            return base_executor(name, args)
+
+        yield from run_agent_loop_streaming(contents, active_tools, combined_executor, system_instruction=system)
+    else:
+        yield from run_agent_loop_streaming(contents, active_tools, base_executor, system_instruction=system)

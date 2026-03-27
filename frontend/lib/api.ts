@@ -147,6 +147,88 @@ export async function sendMessage(text: string, userId: string, skill?: string):
   });
 }
 
+export interface ToolStep {
+  tool: string;
+  args: Record<string, unknown>;
+  status: "running" | "done";
+}
+
+export function streamMessage(
+  text: string,
+  userId: string,
+  skill: string | undefined,
+  callbacks: {
+    onStep: (step: ToolStep) => void;
+    onDelta: (text: string) => void;
+    onDone: (meta: { mode: string; skill?: string }) => void;
+    onError: (message: string) => void;
+  },
+): AbortController {
+  const controller = new AbortController();
+  const body: Record<string, string> = { message: text, user_id: userId };
+  if (skill) body.skill = skill;
+
+  // Bypass Next.js proxy for SSE — proxy buffers the response
+  const isLocal = typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const streamUrl = isLocal
+    ? "http://localhost:8000/api/chat/stream"
+    : `${API}/chat/stream`;
+
+  fetch(streamUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: controller.signal,
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        callbacks.onError(`API error: ${res.status}`);
+        return;
+      }
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      let eventType = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events from buffer
+        const lines = buffer.split("\n");
+        buffer = lines.pop()!; // keep incomplete line
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7).trim();
+          } else if (line.startsWith("data: ") && eventType) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (eventType === "step") callbacks.onStep(data as ToolStep);
+              else if (eventType === "delta") callbacks.onDelta(data.text);
+              else if (eventType === "done") callbacks.onDone(data);
+              else if (eventType === "error") callbacks.onError(data.message);
+            } catch {
+              // skip malformed JSON
+            }
+            eventType = "";
+          } else if (line === "") {
+            eventType = "";
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      if (err.name !== "AbortError") {
+        callbacks.onError(String(err));
+      }
+    });
+
+  return controller;
+}
+
 export async function getSkills(): Promise<SkillInfo[]> {
   const data = await fetchJSON<{ skills: SkillInfo[] }>("/skills");
   return data.skills;
