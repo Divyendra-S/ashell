@@ -10,10 +10,7 @@ interface Goal {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export function GoalTracker({
@@ -33,55 +30,39 @@ export function GoalTracker({
   }
 
   return (
-    <div className="rounded-xl border border-surface-2 bg-surface-1 p-4">
-      <h3 className="mb-3 text-sm font-medium text-text-primary">Goals</h3>
-
+    <div className="space-y-5">
       {/* Pending */}
       {pendingGoals.length > 0 ? (
-        <div className="mb-4 space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-text-tertiary">
-            Pending
-          </p>
+        <div className="space-y-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Pending</p>
           {pendingGoals.map((g) => (
             <label
               key={g.id}
-              className="flex cursor-pointer items-start gap-2 text-sm text-text-secondary hover:text-text-primary"
+              className="flex cursor-pointer items-start gap-2 text-[12px] text-text-secondary transition-colors hover:text-text-primary"
             >
               <input
                 type="checkbox"
                 onChange={() => handleComplete(g.id)}
-                className="mt-0.5 h-3.5 w-3.5 rounded border-surface-3 bg-surface-0 accent-accent"
+                className="mt-0.5 h-3 w-3 rounded border-surface-3/30 bg-transparent accent-accent"
               />
               <div>
                 <span>{g.content}</span>
-                <span className="ml-2 text-[10px] text-text-tertiary">
-                  {formatDate(g.created_at)}
-                </span>
+                <span className="ml-1.5 text-[10px] text-text-tertiary">{formatDate(g.created_at)}</span>
               </div>
             </label>
           ))}
         </div>
       ) : (
-        <p className="mb-4 text-xs text-text-tertiary">No pending goals</p>
+        <p className="text-[11px] text-text-tertiary">No pending goals</p>
       )}
 
       {/* Completed */}
       {completedGoals.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-text-tertiary">
-            Completed
-          </p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Completed</p>
           {completedGoals.map((g) => (
-            <div
-              key={g.id}
-              className="flex items-start gap-2 text-sm text-text-tertiary line-through"
-            >
-              <input
-                type="checkbox"
-                checked
-                disabled
-                className="mt-0.5 h-3.5 w-3.5 rounded border-surface-3 bg-surface-0 accent-accent"
-              />
+            <div key={g.id} className="flex items-start gap-2 text-[12px] text-text-tertiary line-through">
+              <input type="checkbox" checked disabled className="mt-0.5 h-3 w-3 rounded border-surface-3/20 bg-transparent accent-accent" />
               <span>{g.content}</span>
             </div>
           ))}

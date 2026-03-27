@@ -18,45 +18,28 @@ export default function VoicePage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    if (!userId) {
-      router.push("/login");
-    }
+    if (!userId) router.push("/login");
   }, [userId, router]);
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      clientRef.current?.disconnect();
-    };
+    return () => { clientRef.current?.disconnect(); };
   }, []);
 
   const connect = useCallback(async () => {
     if (!userId) return;
     setState("connecting");
     setError(null);
-
     try {
       const transport = new SmallWebRTCTransport({
-        webrtcRequestParams: {
-          endpoint: "/api/offer",
-          requestData: { user_id: userId },
-        },
+        webrtcRequestParams: { endpoint: "/api/offer", requestData: { user_id: userId } },
       });
-
       const client = new PipecatClient({
-        transport,
-        enableMic: true,
-        enableCam: false,
+        transport, enableMic: true, enableCam: false,
         callbacks: {
           onConnected: () => setState("connected"),
-          onDisconnected: () => {
-            setState("idle");
-            clientRef.current = null;
-          },
+          onDisconnected: () => { setState("idle"); clientRef.current = null; },
           onBotReady: () => setState("connected"),
-          onTransportStateChanged: (s: string) => {
-            if (s === "error") setState("error");
-          },
+          onTransportStateChanged: (s: string) => { if (s === "error") setState("error"); },
           onTrackStarted: (track: MediaStreamTrack) => {
             if (track.kind === "audio" && audioRef.current) {
               audioRef.current.srcObject = new MediaStream([track]);
@@ -65,12 +48,9 @@ export default function VoicePage() {
           },
         },
       });
-
       clientRef.current = client;
-
       await client.connect();
     } catch (err) {
-      console.error("Voice connection error:", err);
       setError(err instanceof Error ? err.message : "Connection failed");
       setState("error");
       clientRef.current = null;
@@ -79,11 +59,7 @@ export default function VoicePage() {
 
   const disconnect = useCallback(async () => {
     setState("disconnecting");
-    try {
-      await clientRef.current?.disconnect();
-    } catch (err) {
-      console.error("Disconnect error:", err);
-    }
+    try { await clientRef.current?.disconnect(); } catch {}
     clientRef.current = null;
     setState("idle");
   }, []);
@@ -98,22 +74,23 @@ export default function VoicePage() {
 
   if (!userId) return null;
 
+  const isListening = state === "connected" && !isMuted;
+
   return (
-    <div className="flex h-full flex-col bg-surface-0 text-text-primary">
+    <div className="gradient-page flex h-full flex-col bg-surface-0 text-text-primary">
       <audio ref={audioRef} autoPlay />
-      {/* Main content */}
       <main className="flex flex-1 flex-col items-center justify-center px-6">
-        <div className="flex flex-col items-center gap-8">
+        <div className="flex flex-col items-center gap-10">
           {/* Status */}
           <div className="text-center">
-            <h2 className="mb-2 text-xl font-medium text-text-primary">
+            <h2 className="text-xl font-extralight tracking-tight text-text-primary">
               {state === "idle" && "Daily Check-in"}
               {state === "connecting" && "Connecting..."}
               {state === "connected" && (isMuted ? "Muted" : "Listening...")}
               {state === "disconnecting" && "Ending session..."}
               {state === "error" && "Connection Error"}
             </h2>
-            <p className="text-sm text-text-tertiary">
+            <p className="mt-2 text-[13px] text-text-tertiary">
               {state === "idle" && "Tap the mic to start your voice check-in with Kuro"}
               {state === "connecting" && "Setting up your session"}
               {state === "connected" && (isMuted ? "Tap the mic to unmute" : "Speak naturally \u2014 Kuro is listening")}
@@ -124,59 +101,55 @@ export default function VoicePage() {
 
           {/* Mic button */}
           <div className="relative">
-            {state === "connected" && !isMuted && (
+            {isListening && (
               <>
-                <div className="absolute inset-0 -m-4 animate-ping rounded-full bg-accent/20" style={{ animationDuration: "2s" }} />
-                <div className="absolute inset-0 -m-2 animate-ping rounded-full bg-accent/10" style={{ animationDuration: "2s", animationDelay: "0.5s" }} />
+                <div className="absolute inset-0 -m-5 animate-ping rounded-full bg-accent/15" style={{ animationDuration: "2s" }} />
+                <div className="absolute inset-0 -m-2.5 animate-ping rounded-full bg-accent/8" style={{ animationDuration: "2s", animationDelay: "0.5s" }} />
               </>
             )}
-
             <button
               onClick={state === "idle" || state === "error" ? connect : state === "connected" ? toggleMute : undefined}
               disabled={state === "connecting" || state === "disconnecting"}
               className={`relative z-10 flex h-24 w-24 items-center justify-center rounded-full transition-all duration-300 ${
-                state === "connected" && !isMuted
-                  ? "bg-accent text-surface-0 shadow-lg shadow-accent/25"
+                isListening
+                  ? "bg-accent text-white shadow-[0_0_40px_-8px_rgba(129,140,248,0.4)]"
                   : state === "connected" && isMuted
-                    ? "bg-surface-2 text-text-tertiary"
+                    ? "bg-surface-1/60 text-text-tertiary"
                     : state === "connecting"
-                      ? "animate-pulse bg-surface-2 text-text-tertiary"
-                      : "bg-accent/15 text-accent hover:bg-accent/25"
+                      ? "animate-pulse bg-surface-1/40 text-text-tertiary"
+                      : "bg-accent/10 text-accent hover:bg-accent/15"
               } disabled:opacity-50`}
             >
               {isMuted && state === "connected" ? (
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="1" y1="1" x2="23" y2="23" />
                   <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
                   <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .67-.1 1.32-.27 1.93" />
                   <line x1="12" y1="19" x2="12" y2="23" />
-                  <line x1="8" y1="23" x2="16" y2="23" />
                 </svg>
               ) : (
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="9" y="1" width="6" height="11" rx="3" />
                   <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                   <line x1="12" y1="19" x2="12" y2="23" />
-                  <line x1="8" y1="23" x2="16" y2="23" />
                 </svg>
               )}
             </button>
           </div>
 
-          {/* End session button */}
+          {/* End session / Try again */}
           {state === "connected" && (
             <button
               onClick={disconnect}
-              className="rounded-full border border-red-500/30 px-6 py-2 text-sm text-red-400 transition-colors hover:border-red-500/60 hover:bg-red-500/10"
+              className="rounded-full border border-red-500/20 px-5 py-2 text-[12px] text-red-400/80 transition-all duration-200 hover:border-red-500/40 hover:bg-red-500/5"
             >
               End Session
             </button>
           )}
-
           {state === "error" && (
             <button
               onClick={connect}
-              className="rounded-full border border-accent/30 px-6 py-2 text-sm text-accent transition-colors hover:border-accent/60 hover:bg-accent/10"
+              className="rounded-full border border-accent/20 px-5 py-2 text-[12px] text-accent transition-all duration-200 hover:border-accent/40 hover:bg-accent/5"
             >
               Try Again
             </button>

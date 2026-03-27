@@ -2,22 +2,25 @@
 
 @theme inline {
   /* Surface palette — layered elevation */
-  --color-surface-0: #09090b;
-  --color-surface-1: #18181b;
-  --color-surface-2: #27272a;
-  --color-surface-3: #3f3f46;
+  --color-surface-0: #0c0c0f;
+  --color-surface-1: #1a1a1f;
+  --color-surface-2: #2a2a30;
+  --color-surface-3: #42424a;
 
   /* Text palette */
-  --color-text-primary: #fafafa;
-  --color-text-secondary: #a1a1aa;
-  --color-text-tertiary: #71717a;
+  --color-text-primary: #f5f5f7;
+  --color-text-secondary: #c8c8d0;
+  --color-text-tertiary: #9898a4;
+
+  /* Intermediate elevation */
+  --color-surface-05: #131316;
 
   /* Accent */
-  --color-accent: #818cf8;
+  --color-accent: #8b95ff;
 
   /* Mode colors */
-  --color-mode-query: #34d399;
-  --color-mode-ingest: #a78bfa;
+  --color-mode-query: #3ee8a8;
+  --color-mode-ingest: #b49bff;
 
   /* Fonts */
   --font-sans: var(--font-geist-sans);
@@ -90,4 +93,41 @@ body {
 /* Textarea auto-expand */
 textarea {
   field-sizing: content;
+}
+
+/* Scroll fade mask for panels */
+.scroll-fade {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 20px,
+    black calc(100% - 20px),
+    transparent 100%
+  );
+}
+
+/* Subtle page gradient — unicolor indigo wash */
+.gradient-page {
+  background: linear-gradient(
+    180deg,
+    rgba(129, 140, 248, 0.03) 0%,
+    transparent 40%
+  );
+}
+
+/* Card hover glow — very subtle single-color */
+.glow-card {
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+.glow-card:hover {
+  box-shadow: 0 0 24px -8px rgba(129, 140, 248, 0.12);
+}
+
+/* Panel inner gradient — top-to-bottom fade */
+.gradient-panel {
+  background: linear-gradient(
+    180deg,
+    rgba(129, 140, 248, 0.04) 0%,
+    transparent 120px
+  );
 }
