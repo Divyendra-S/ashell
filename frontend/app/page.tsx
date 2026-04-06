@@ -103,6 +103,11 @@ export default function Home() {
       });
     };
 
+    // Build conversation history from previous messages (exclude the ones we just added)
+    const prevMessages = messages
+      .filter((m) => !m.streaming && m.text.trim())
+      .map((m) => ({ role: m.role === "user" ? "user" : "kuro", text: m.text }));
+
     abortRef.current = streamMessage(text, userId!, skill, {
       onStep: (step) => {
         updateLastMessage((msg) => ({
@@ -149,8 +154,8 @@ export default function Home() {
         setLoading(false);
         abortRef.current = null;
       },
-    });
-  }, [input, loading, userId]);
+    }, prevMessages);
+  }, [input, loading, userId, messages]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e); }

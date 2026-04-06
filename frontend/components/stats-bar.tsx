@@ -134,14 +134,13 @@ export function StatsBar({
     <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
       <StatCard
         label="Concepts"
-        value={stats.entity_count}
-        delta={stats.new_entities_7d}
+        value={stats.concept_count}
+        delta={stats.new_concepts_7d}
         index={0}
       />
       <StatCard
-        label="Facts"
-        value={stats.fact_count}
-        delta={stats.new_facts_7d}
+        label="Links"
+        value={stats.backlink_count}
         index={1}
       />
       <StatCard

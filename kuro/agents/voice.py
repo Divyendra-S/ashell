@@ -13,8 +13,7 @@ from pipecat.services.groq.tts import GroqTTSService
 from pipecat.services.llm_service import FunctionCallParams
 
 from kuro.config import GEMINI_API_KEY, GROQ_API_KEY
-from kuro.memory import store
-from kuro.memory import checkin_store
+from kuro.memory import store, wiki, checkin_store
 
 log = logging.getLogger("kuro.voice")
 
@@ -193,14 +192,14 @@ def _format_goals(goals: list[dict]) -> str:
 
 def build_system_prompt(user_id: str) -> str:
     from datetime import date
-    user_profile = store.read_user_profile(user_id) or "New user — no profile yet."
-    memories = store.get_top_memories(user_id, limit=8)
+    user_profile = wiki.read_page(user_id, "user/profile.md") or "New user — no profile yet."
+    memories_text = wiki.read_memories(user_id) or "No memories saved yet."
     last_session = checkin_store.get_last_session(user_id)
     recent_goals = checkin_store.get_entries_by_type(user_id, "goal", limit=5)
 
     return VOICE_SYSTEM_PROMPT.format(
         user_profile=user_profile,
-        user_memory=_format_memories(memories),
+        user_memory=memories_text,
         last_checkin=_format_last_checkin(last_session),
         pending_goals=_format_goals(recent_goals),
         today_date=date.today().isoformat(),
@@ -291,22 +290,16 @@ def register_tool_handlers(llm: GoogleLLMService, user_id: str, session_id: int)
         ], default=str))
 
     async def on_search_knowledge(params: FunctionCallParams):
-        from kuro.core.retrieval import rewrite_query, hybrid_retrieve, rrf_merge
-        queries = rewrite_query(params.arguments["query"])
-        raw = hybrid_retrieve(queries, user_id=user_id)
-        top = rrf_merge(raw, top_k=5)
-        await params.result_callback(json.dumps([
-            {"title": r.get("title", ""), "content": r.get("content", "")[:200]}
-            for r in top
-        ], default=str))
+        results = wiki.grep_wiki(user_id, params.arguments["query"], max_results=5)
+        await params.result_callback(json.dumps(results, default=str))
 
     async def on_save_memory(params: FunctionCallParams):
-        result = store.upsert_user_memory(
-            user_id, params.arguments["name"], params.arguments["type"],
-            params.arguments["content"],
-            importance=params.arguments.get("importance", 5),
-        )
-        result.pop("_consolidated_from", None)
+        current = wiki.read_memories(user_id) or "# Memories\n"
+        mem_type = params.arguments.get("type", "context")
+        new_entry = f"- **{params.arguments['name']}**: {params.arguments['content']}"
+        # Append to the appropriate section or end of file
+        updated = current.rstrip() + "\n" + new_entry + "\n"
+        wiki.write_memories(user_id, updated)
         await params.result_callback(json.dumps({"status": "saved"}, default=str))
 
     async def on_end_session(params: FunctionCallParams):

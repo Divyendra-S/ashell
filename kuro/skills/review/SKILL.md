@@ -1,7 +1,6 @@
 ---
 name: review
 description: Analyze knowledge base health — find orphan entities, sparse topics, and suggest areas to enrich
-mode: query
 triggers:
   - "review my KB"
   - "knowledge health"
@@ -24,27 +23,27 @@ You are performing a health check on the user's knowledge base. Follow this work
 ## Step 2: Find Issues
 Identify and categorize problems:
 
-### Orphan Entities
-- Entities with 0 facts stored about them (just a name, no substance)
-- Entities with 0 relations (isolated nodes in the graph)
+### Orphan Pages
+- Wiki pages with no meaningful content (just a title, no substance)
+- Wiki pages with no [[backlinks]] to or from other pages (isolated)
 
 ### Sparse Topics
 - Topics with only 1 article
-- Entities mentioned in articles but never formally stored
+- Concepts mentioned in articles but without a wiki page
 
 ### Rich Areas
-- Topics with the most facts, relations, and articles
-- Well-connected entities (many relations)
+- Topics with the most detailed wiki pages and articles
+- Well-connected pages (many [[backlinks]])
 
 ## Step 3: Report
 Present a structured KB health report:
-- **Overview**: Total articles, entities, facts, relations
+- **Overview**: Total articles, wiki pages, and [[backlink]] connections
 - **Richest Topics**: Top 3-5 best-covered areas
 - **Sparse Areas**: Topics that need more content
-- **Orphan Entities**: Entities to either enrich or clean up
-- **Suggestions**: 3-5 specific actions to improve KB quality (e.g., "Add facts about X", "Ingest an article about Y to connect it to Z")
+- **Orphan Pages**: Pages to either enrich or clean up
+- **Suggestions**: 3-5 specific actions to improve KB quality (e.g., "Expand the wiki page for X", "Ingest an article about Y and link it to Z")
 
 ## Gotchas
-- **Don't suggest removing orphans immediately** — the user may plan to enrich them later. Frame as "these could use more detail" rather than "these should be deleted."
+- **Don't suggest removing orphan pages immediately** — the user may plan to enrich them later. Frame as "these could use more detail" rather than "these should be deleted."
 - **Keep the report scannable.** Use bullet points and counts, not paragraphs.
 - **This is about the KB, not general knowledge.** Don't suggest topics the user "should" know — only surface what's already partially in the KB that could be improved.

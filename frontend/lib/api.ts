@@ -1,6 +1,5 @@
 export interface ChatResponse {
   response: string;
-  mode: "ingest" | "query";
   skill?: string | null;
 }
 
@@ -11,18 +10,17 @@ export interface SkillInfo {
 }
 
 export interface GraphEntity {
-  id: number;
+  id: string;
   name: string;
   entity_type: string;
   summary: string | null;
   fact_count: number;
-  community_id: number | null;
 }
 
 export interface GraphRelation {
-  id: number;
-  source_id: number;
-  target_id: number;
+  id: string;
+  source_id: string;
+  target_id: string;
   relation_type: string;
   context: string | null;
   source_name: string;
@@ -35,31 +33,30 @@ export interface GraphData {
 }
 
 export interface Stats {
-  entity_count: number;
-  fact_count: number;
+  concept_count: number;
+  backlink_count: number;
   article_count: number;
-  relation_count: number;
-  new_entities_7d: number;
-  new_facts_7d: number;
+  new_concepts_7d: number;
   new_articles_7d: number;
   health_score: number;
 }
 
 export interface GrowthDay {
   date: string;
-  entities: number;
-  facts: number;
+  concepts: number;
   articles: number;
 }
 
-export interface EntityDetail {
-  id: number;
+export interface ConceptDetail {
+  slug: string;
   name: string;
-  entity_type: string;
   summary: string | null;
+  content: string;
+  backlinks: { name: string; slug: string }[];
+  incoming_backlinks: { name: string; slug: string }[];
+  notes: string | null;
   created_at: string;
-  facts: { id: number; content: string; source: string; created_at: string }[];
-  relations: GraphRelation[];
+  updated_at: string;
 }
 
 export interface Article {
@@ -70,11 +67,10 @@ export interface Article {
   is_read: boolean;
   read_at: string | null;
   created_at: string;
-  chunk_count: number;
 }
 
 export interface TimelineEntry {
-  type: "checkin" | "article" | "entity" | "goal_set";
+  type: "checkin" | "article" | "concept" | "goal_set";
   date: string;
   data: Record<string, unknown>;
 }
@@ -85,33 +81,9 @@ export interface StreakData {
   total_active_days: number;
 }
 
-export interface Note {
-  id: number;
-  content: string;
-  entity_id: number | null;
-  article_id: number | null;
-  created_at: string;
-}
-
-export interface Passage {
-  id: number;
-  entity_id: number;
-  article_id: number;
-  content: string;
-  created_at: string;
-  articles: { id: number; title: string; url: string | null } | null;
-}
-
-export interface ConceptDetail extends EntityDetail {
-  notes: Note[];
-  learning_entries: { id: number; content: string; created_at: string }[];
-  related_articles: { id: number; title: string; url: string | null }[];
-  passages: Passage[];
-}
-
 export interface DigestData {
   streak: StreakData;
-  recent_entities: { name: string; entity_type: string }[];
+  recent_concepts: { name: string }[];
   recent_articles: { title: string; url: string | null }[];
   pending_goals: { id: number; content: string; created_at: string }[];
   study_suggestion: string | null;
@@ -163,10 +135,12 @@ export function streamMessage(
     onDone: (meta: { mode: string; skill?: string }) => void;
     onError: (message: string) => void;
   },
+  history?: { role: string; text: string }[],
 ): AbortController {
   const controller = new AbortController();
-  const body: Record<string, string> = { message: text, user_id: userId };
+  const body: Record<string, unknown> = { message: text, user_id: userId };
   if (skill) body.skill = skill;
+  if (history?.length) body.history = history;
 
   // Bypass Next.js proxy for SSE — proxy buffers the response
   const isLocal = typeof window !== "undefined" &&
@@ -247,8 +221,8 @@ export async function getGrowth(userId: string, days = 30): Promise<GrowthDay[]>
   return data.data;
 }
 
-export async function getEntityDetail(id: number, userId: string): Promise<EntityDetail> {
-  return fetchJSON<EntityDetail>(`/entity/${id}?user_id=${userId}`);
+export async function getConceptDetail(slug: string, userId: string): Promise<ConceptDetail> {
+  return fetchJSON<ConceptDetail>(`/concept/${slug}?user_id=${userId}`);
 }
 
 export async function getArticles(userId: string): Promise<Article[]> {
@@ -273,23 +247,14 @@ export async function getDigest(userId: string): Promise<DigestData> {
   return fetchJSON<DigestData>(`/digest?user_id=${userId}`);
 }
 
-export async function getConceptDetail(entityId: number, userId: string): Promise<ConceptDetail> {
-  return fetchJSON<ConceptDetail>(`/concept/${entityId}?user_id=${userId}`);
-}
-
-export async function createNote(userId: string, content: string, entityId?: number, articleId?: number): Promise<Note> {
-  return fetchJSON<Note>("/notes", {
+export async function createNote(userId: string, content: string, conceptSlug: string): Promise<{ status: string; concept_slug: string }> {
+  return fetchJSON("/notes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       user_id: userId,
       content,
-      entity_id: entityId ?? null,
-      article_id: articleId ?? null,
+      concept_slug: conceptSlug,
     }),
   });
-}
-
-export async function deleteNote(noteId: number, userId: string): Promise<void> {
-  await fetchJSON(`/notes/${noteId}?user_id=${userId}`, { method: "DELETE" });
 }

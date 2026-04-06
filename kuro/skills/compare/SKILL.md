@@ -20,7 +20,7 @@ You are performing a structured comparison. Follow this workflow:
 
 ## Step 2: Parallel Retrieval
 - Retrieve knowledge about each subject independently
-- Use `get_facts_for_entity` and `get_relations_for_entity` for each subject
+- Use `read_wiki_page` to load the concept page for each subject
 - Use `grep_articles` to find article content mentioning each subject
 - Use `read_article` for full context when needed
 

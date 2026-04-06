@@ -68,10 +68,10 @@ def append_skill_data(skill_name: str, filename: str, record: dict, user_id: str
 # Guards are functions that check if a tool call should be blocked.
 # They return an error message string if blocked, or None if allowed.
 
-_WRITE_TOOLS = {"store_entity", "store_fact", "store_relation", "save_article", "append_skill_data", "save_memory"}
+_WRITE_TOOLS = {"write_wiki_page", "update_memories", "update_wiki_index", "update_wiki_recent", "save_article", "append_skill_data", "update_profile"}
 
 def _guard_no_store(name: str, args: dict) -> str | None:
-    """Block all write/store tools — read-only mode."""
+    """Block all write tools — read-only mode."""
     if name in _WRITE_TOOLS:
         return f"Tool '{name}' is blocked: this skill runs in read-only mode."
     return None

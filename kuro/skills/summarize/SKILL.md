@@ -15,8 +15,8 @@ You are creating a comprehensive summary. Follow this workflow:
 
 ## Step 1: Gather Everything
 - Use all available retrieval tools to collect everything the KB has on the topic
-- Search for the main entity and related entities
-- Use `traverse_relations` to find connected knowledge (depth 2-3)
+- Use `read_wiki_page` for the main concept and follow [[backlinks]] to related pages
+- Use `grep_wiki` to find connected knowledge across wiki pages
 - Use `grep_articles` to find all article mentions
 - Use `list_articles` if needed to find relevant articles by title
 

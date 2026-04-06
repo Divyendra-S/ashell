@@ -6,7 +6,7 @@ import type { TimelineEntry } from "../lib/api";
 const TYPE_CONFIG: Record<string, { color: string; label: string }> = {
   checkin: { color: "bg-accent/15 text-accent", label: "Check-in" },
   article: { color: "bg-mode-ingest/15 text-mode-ingest", label: "Article" },
-  entity: { color: "bg-mode-query/15 text-mode-query", label: "Entity" },
+  concept: { color: "bg-mode-query/15 text-mode-query", label: "Concept" },
   goal_set: { color: "bg-amber-500/12 text-amber-600 dark:text-amber-400", label: "Goal" },
 };
 
@@ -25,7 +25,7 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
   switch (entry.type) {
     case "checkin": description = (entry.data.summary as string) || `Session with ${entry.data.entry_count} entries`; break;
     case "article": description = entry.data.title as string; break;
-    case "entity": description = `${entry.data.name} (${entry.data.entity_type})`; break;
+    case "concept": description = entry.data.name as string; break;
     case "goal_set": {
       description = entry.data.content as string;
       if (entry.data.completed_at) description += " (completed)";

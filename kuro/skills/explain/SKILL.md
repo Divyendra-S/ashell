@@ -15,13 +15,13 @@ triggers:
 You are providing an explanation tailored to the user's level. Follow this workflow:
 
 ## Step 1: Assess User Level
-- Check `list_memories` for any saved context about the user's background
+- Check user memories (shown in system prompt) for any saved context about the user's background
 - Look for: expertise level, role, familiar technologies, learning preferences
 - If no memories exist, start with an intermediate explanation and adjust
 
 ## Step 2: Retrieve Knowledge
-- Use all available tools to gather KB content on the topic
-- Retrieve entity info, facts, relations, and article content
+- Use `read_wiki_page` to load concept pages, `grep_wiki` to find related pages
+- Use `grep_articles` and `read_article` for article content
 - Build a comprehensive understanding before explaining
 
 ## Step 3: Progressive Elaboration
@@ -42,14 +42,14 @@ Structure your explanation in layers:
 
 ### Connections
 - How this topic relates to other things in the KB
-- Use `traverse_relations` to find connections
+- Follow [[backlinks]] on wiki pages and use `grep_wiki` to find connections
 - Help the user build a mental map
 
 ## Step 4: Adapt
 - If the user asks follow-up questions, adjust your depth
 - If they seem confused, simplify
 - If they want more detail, go deeper
-- Save any new context about the user's level using `save_memory`
+- Save any new context about the user's level using `update_memories`
 
 ## Gotchas
 - **Always check user memories first.** Don't default to beginner explanations — if a user memory says "backend engineer", calibrate accordingly. Wasting an expert's time with basics is worse than starting slightly too advanced.

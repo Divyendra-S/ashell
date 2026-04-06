@@ -3,9 +3,11 @@
 import { useCallback, useRef, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useTheme } from "../lib/theme";
 import type { GraphData, ConceptDetail, Stats } from "../lib/api";
-import { getConceptDetail, createNote, deleteNote } from "../lib/api";
+import { getConceptDetail, createNote } from "../lib/api";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
@@ -26,11 +28,10 @@ function hashColor(name: string): string {
 }
 
 interface GraphNode {
-  id: number;
+  id: string;
   name: string;
   entity_type: string;
   fact_count: number;
-  community_id: number | null;
   val: number;
   color: string;
   x?: number;
@@ -38,8 +39,8 @@ interface GraphNode {
 }
 
 interface GraphLink {
-  source: number | GraphNode;
-  target: number | GraphNode;
+  source: string | GraphNode;
+  target: string | GraphNode;
   label: string;
 }
 
@@ -90,8 +91,8 @@ function StatsOverlay({ stats }: { stats: Stats | null }) {
   if (!stats) return null;
 
   const items = [
-    { label: "Concepts", value: stats.entity_count, delta: stats.new_entities_7d },
-    { label: "Facts", value: stats.fact_count, delta: stats.new_facts_7d },
+    { label: "Concepts", value: stats.concept_count, delta: stats.new_concepts_7d },
+    { label: "Links", value: stats.backlink_count },
     { label: "Articles", value: stats.article_count, delta: stats.new_articles_7d },
     { label: "Health", value: stats.health_score, suffix: "/ 100" },
   ];
@@ -190,7 +191,8 @@ export function KnowledgeGraph({
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const hasInteracted = useRef(false);
 
-  const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [conceptDetail, setConceptDetail] = useState<ConceptDetail | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
   const [noteText, setNoteText] = useState("");
@@ -221,10 +223,10 @@ export function KnowledgeGraph({
   }, []);
 
   const loadConceptDetail = useCallback(
-    async (nodeId: number) => {
+    async (slug: string) => {
       setPanelLoading(true);
       try {
-        setConceptDetail(await getConceptDetail(nodeId, userId));
+        setConceptDetail(await getConceptDetail(slug, userId));
       } catch {
         setConceptDetail(null);
       } finally {
@@ -234,20 +236,25 @@ export function KnowledgeGraph({
     [userId]
   );
 
+  const nameToSlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+
   const handleNodeClick = useCallback(
     (node: any) => {
       if (!node?.id) return;
       hasInteracted.current = true;
       focusNode(node);
       setSelectedNodeId(node.id);
+      const slug = nameToSlug(node.name);
+      setSelectedSlug(slug);
       setNoteText("");
-      loadConceptDetail(node.id);
+      loadConceptDetail(slug);
     },
     [focusNode, loadConceptDetail]
   );
 
   const handleBackgroundClick = useCallback(() => {
     setSelectedNodeId(null);
+    setSelectedSlug(null);
     setConceptDetail(null);
     setNoteText("");
   }, []);
@@ -265,37 +272,28 @@ export function KnowledgeGraph({
   const handleAddNote = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!noteText.trim() || !selectedNodeId) return;
+      if (!noteText.trim() || !selectedSlug) return;
       setSavingNote(true);
       try {
-        await createNote(userId, noteText.trim(), selectedNodeId);
+        await createNote(userId, noteText.trim(), selectedSlug);
         setNoteText("");
-        await loadConceptDetail(selectedNodeId);
+        await loadConceptDetail(selectedSlug);
       } catch {}
       setSavingNote(false);
     },
-    [noteText, selectedNodeId, userId, loadConceptDetail]
-  );
-
-  const handleDeleteNote = useCallback(
-    async (noteId: number) => {
-      if (!selectedNodeId) return;
-      try {
-        await deleteNote(noteId, userId);
-        await loadConceptDetail(selectedNodeId);
-      } catch {}
-    },
-    [selectedNodeId, userId, loadConceptDetail]
+    [noteText, selectedSlug, userId, loadConceptDetail]
   );
 
   const handleRelationClick = useCallback(
-    (entityId: number) => {
+    (nodeId: string, nodeName: string) => {
       if (!graphRef.current) return;
-      const node = graphRef.current.graphData().nodes.find((n: any) => n.id === entityId);
+      const node = graphRef.current.graphData().nodes.find((n: any) => n.id === nodeId);
       if (node) focusNode(node);
-      setSelectedNodeId(entityId);
+      setSelectedNodeId(nodeId);
+      const slug = nameToSlug(nodeName);
+      setSelectedSlug(slug);
       setNoteText("");
-      loadConceptDetail(entityId);
+      loadConceptDetail(slug);
     },
     [focusNode, loadConceptDetail]
   );
@@ -385,22 +383,13 @@ export function KnowledgeGraph({
     );
   }
 
-  const communityIds = [
-    ...new Set(data.entities.map((e) => e.community_id).filter((c): c is number => c != null)),
-  ].sort((a, b) => a - b);
-  const communityColorMap: Record<number, string> = {};
-  communityIds.forEach((cid, i) => {
-    communityColorMap[cid] = CONCEPT_COLORS[i % CONCEPT_COLORS.length];
-  });
-
   const nodes: GraphNode[] = data.entities.map((e) => ({
     id: e.id,
     name: e.name,
     entity_type: e.entity_type,
     fact_count: e.fact_count,
-    community_id: e.community_id,
     val: Math.max(2, e.fact_count * 1.5 + 1),
-    color: e.community_id != null ? communityColorMap[e.community_id] : hashColor(e.name),
+    color: hashColor(e.name),
   }));
 
   const nodeIds = new Set(nodes.map((n) => n.id));
@@ -521,63 +510,37 @@ export function KnowledgeGraph({
                       {conceptDetail.name}
                     </h3>
                   </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <span className="rounded-full bg-accent/8 px-2 py-[2px] text-[9px] font-medium uppercase tracking-wider text-accent">
-                      {conceptDetail.entity_type}
-                    </span>
-                    {(conceptDetail as any).community && (
-                      <>
-                        <span className="text-text-tertiary">·</span>
-                        <div className="flex items-center gap-1">
-                          <span
-                            className="inline-block h-[5px] w-[5px] rounded-full"
-                            style={{
-                              backgroundColor: (conceptDetail as any).community_id != null
-                                ? communityColorMap[(conceptDetail as any).community_id]
-                                : undefined,
-                            }}
-                          />
-                          <span className="text-[9px] text-text-tertiary">
-                            {(conceptDetail as any).community.name}
-                          </span>
-                        </div>
-                      </>
-                    )}
-                  </div>
                   {conceptDetail.summary && (
                     <p className="mt-2.5 text-[12px] leading-[1.7] text-text-secondary">
                       {conceptDetail.summary}
                     </p>
                   )}
 
-                  {/* Connected Concepts — right below header, navigation first */}
-                  {conceptDetail.relations.length > 0 && (
+                  {/* Connected Concepts — backlinks */}
+                  {conceptDetail.backlinks.length > 0 && (
                     <motion.div
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: 0.2 }}
                       className="mt-3 flex flex-wrap gap-1.5"
                     >
-                      {conceptDetail.relations.map((r, i) => {
-                        const isSource = r.source_id === selectedNodeId;
-                        const linkedId = isSource ? r.target_id : r.source_id;
-                        const linkedName = isSource ? r.target_name : r.source_name;
-                        const linkedNode = nodes.find((n) => n.id === linkedId);
+                      {conceptDetail.backlinks.map((bl, i) => {
+                        const linkedNode = nodes.find((n) => nameToSlug(n.name) === bl.slug);
                         return (
                           <motion.button
-                            key={r.id}
+                            key={`${bl.slug}-${i}`}
                             initial={{ opacity: 0, scale: 0.92 }}
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{ duration: 0.15, delay: 0.22 + i * 0.025 }}
                             whileHover={{ scale: 1.04 }}
                             whileTap={{ scale: 0.97 }}
-                            onClick={() => handleRelationClick(linkedId)}
+                            onClick={() => linkedNode && handleRelationClick(linkedNode.id, linkedNode.name)}
                             className="flex items-center gap-1 rounded-full border border-surface-2/35 px-2 py-[3px] text-[10px] text-text-tertiary transition-all duration-150 hover:border-accent/25 hover:text-accent"
                           >
                             {linkedNode && (
                               <span className="inline-block h-1 w-1 rounded-full" style={{ backgroundColor: linkedNode.color, opacity: 0.6 }} />
                             )}
-                            {linkedName}
+                            {bl.name}
                           </motion.button>
                         );
                       })}
@@ -587,82 +550,44 @@ export function KnowledgeGraph({
 
                 <div className="h-px shrink-0 bg-surface-2/15" />
 
-                {/* Scrollable content */}
+                {/* Scrollable content — render markdown content as structured sections */}
                 <div className="flex-1 overflow-y-auto px-5 pb-20">
-                  {/* Key Facts — bullet list style, no cards */}
-                  <motion.div
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: 0.15 }}
-                    className="py-4"
-                  >
-                    <h4 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
-                      Key Facts
-                    </h4>
-                    {conceptDetail.facts.length > 0 ? (
-                      <ul className="space-y-2">
-                        {conceptDetail.facts.map((f, i) => (
-                          <motion.li
-                            key={f.id}
-                            initial={{ opacity: 0, x: -6 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ duration: 0.2, delay: 0.2 + i * 0.035 }}
-                            className="flex gap-2.5 text-[12px] leading-[1.65] text-text-secondary"
-                          >
-                            <span className="mt-[9px] h-[3px] w-[3px] shrink-0 rounded-full bg-accent/40" />
-                            <span>{f.content}</span>
-                          </motion.li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-[11px] text-text-tertiary">No facts recorded yet.</p>
-                    )}
-                  </motion.div>
+                  {/* Parse and render content sections from markdown */}
+                  {(() => {
+                    const sections = conceptDetail.content.split(/^## /m).filter(Boolean);
+                    return sections.map((section, si) => {
+                      const lines = section.split("\n");
+                      const heading = lines[0]?.replace(/^#+ /, "").trim();
+                      // Skip the title heading (already shown above) and Notes (shown separately)
+                      if (si === 0 && heading === conceptDetail.name) return null;
+                      if (heading === "Notes") return null;
+                      const body = lines.slice(1).join("\n").trim();
+                      if (!body) return null;
+                      // Strip [[backlink]] syntax for display
+                      const cleanBody = body.replace(/\[\[([^\]]+)\]\]/g, "$1");
+                      return (
+                        <motion.div
+                          key={heading}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3, delay: 0.15 + si * 0.05 }}
+                          className={si > 0 ? "border-t border-surface-2/25 py-4" : "py-4"}
+                        >
+                          {si > 0 && (
+                            <h4 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
+                              {heading}
+                            </h4>
+                          )}
+                          <div className="prose prose-sm prose-invert max-w-none text-[12px] leading-[1.65] text-text-secondary prose-headings:text-text-primary prose-strong:text-text-primary prose-code:rounded prose-code:bg-surface-1 prose-code:px-1 prose-code:py-0.5 prose-code:text-[11px] prose-code:text-accent prose-pre:bg-surface-1 prose-pre:text-[11px] prose-li:my-0.5 prose-p:my-1.5 prose-ul:my-1">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanBody}</ReactMarkdown>
+                          </div>
+                        </motion.div>
+                      );
+                    });
+                  })()}
 
-                  {/* Source Passages — blockquote style with left border */}
-                  {conceptDetail.passages && conceptDetail.passages.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3, delay: 0.2 }}
-                      className="border-t border-surface-2/25 py-4"
-                    >
-                      <h4 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
-                        Sources
-                      </h4>
-                      <div className="space-y-3">
-                        {conceptDetail.passages.map((p, i) => (
-                          <motion.div
-                            key={p.id}
-                            initial={{ opacity: 0, x: -6 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ duration: 0.2, delay: 0.25 + i * 0.04 }}
-                            className="border-l-2 border-accent/20 pl-3.5"
-                          >
-                            <p className="whitespace-pre-line text-[11.5px] leading-[1.7] text-text-secondary italic">
-                              {p.content}
-                            </p>
-                            {p.articles && (
-                              <a
-                                href={p.articles.url || "#"}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="mt-1.5 inline-flex items-center gap-1 text-[10px] text-accent transition-colors hover:text-accent"
-                              >
-                                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="shrink-0">
-                                  <path d="M3.5 1.5h5v5M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                                {p.articles.title}
-                              </a>
-                            )}
-                          </motion.div>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* Notes — clean list */}
-                  {conceptDetail.notes.length > 0 && (
+                  {/* Notes section */}
+                  {conceptDetail.notes && (
                     <motion.div
                       initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -673,72 +598,17 @@ export function KnowledgeGraph({
                         Notes
                       </h4>
                       <div className="space-y-1.5">
-                        {conceptDetail.notes.map((n, i) => (
+                        {conceptDetail.notes.split("\n").filter((l) => l.startsWith("- ")).map((line, i) => (
                           <motion.div
-                            key={n.id}
+                            key={i}
                             initial={{ opacity: 0, x: -4 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ duration: 0.15, delay: 0.3 + i * 0.03 }}
-                            className="group flex items-start gap-2"
+                            className="flex items-start gap-2"
                           >
                             <span className="mt-[7px] text-[10px] text-mode-ingest/40">~</span>
-                            <p className="flex-1 text-[12px] leading-[1.6] text-text-secondary">{n.content}</p>
-                            <button
-                              onClick={() => handleDeleteNote(n.id)}
-                              className="mt-0.5 shrink-0 rounded p-0.5 text-text-tertiary opacity-0 transition-all duration-150 hover:text-red-400/80 group-hover:opacity-100"
-                            >
-                              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                                <path d="M2.5 2.5l5 5M7.5 2.5l-5 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-                              </svg>
-                            </button>
+                            <p className="flex-1 text-[12px] leading-[1.6] text-text-secondary">{line.slice(2)}</p>
                           </motion.div>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* Learning History — collapsible */}
-                  {conceptDetail.learning_entries.length > 0 && (
-                    <CollapsibleSection title="Learning History" delay={0.3}>
-                      <div className="space-y-2 pt-1">
-                        {conceptDetail.learning_entries.map((l) => (
-                          <div key={l.id} className="flex gap-2.5 text-[11.5px] leading-[1.6]">
-                            <span className="shrink-0 text-[10px] text-text-tertiary">{new Date(l.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
-                            <span className="text-text-secondary">{l.content}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </CollapsibleSection>
-                  )}
-
-                  {/* Related Articles — compact links */}
-                  {conceptDetail.related_articles.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3, delay: 0.35 }}
-                      className="border-t border-surface-2/25 py-4"
-                    >
-                      <h4 className="mb-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
-                        Related Reading
-                      </h4>
-                      <div className="space-y-1">
-                        {conceptDetail.related_articles.map((a, i) => (
-                          <motion.a
-                            key={a.id}
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            transition={{ delay: 0.4 + i * 0.03 }}
-                            href={a.url || "#"}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="group flex items-center gap-2 py-1 text-[11px] text-text-tertiary transition-colors hover:text-accent"
-                          >
-                            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="shrink-0 opacity-40 group-hover:opacity-70">
-                              <path d="M3.5 1.5h5v5M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                            <span className="truncate">{a.title}</span>
-                          </motion.a>
                         ))}
                       </div>
                     </motion.div>

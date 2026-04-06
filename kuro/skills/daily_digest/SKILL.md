@@ -1,7 +1,6 @@
 ---
 name: daily-digest
 description: Generate a digest of recent knowledge additions, connections, and review suggestions
-mode: query
 triggers:
   - "daily digest"
   - "what's new"
@@ -16,19 +15,20 @@ You are generating a daily knowledge digest for the user. Follow this workflow:
 
 ## Step 1: Recent Activity
 - Use `list_articles` to find recently added articles
-- Query entities and facts to identify recent additions
+- Use `grep_wiki` to identify recently added or updated wiki pages
 - If study session data exists (in skill data), read it for recent scores
 
 ## Step 2: Find Connections
-- For recently added knowledge, use `traverse_relations` to find how it connects to existing knowledge
+- For recently added knowledge, use `grep_wiki` to search for related pages and follow `[[backlinks]]` to find how it connects to existing knowledge
+- Use `read_wiki_page` to load pages and check their backlinks
 - Highlight any surprising or non-obvious connections between new and old content
 
 ## Step 3: Generate Digest
 Present a structured daily digest:
 
 ### What's New
-- List of recently ingested articles and entities (with brief descriptions)
-- Key facts and relations added
+- List of recently ingested articles and wiki pages (with brief descriptions)
+- Key concepts and connections added
 
 ### Connections Discovered
 - How new knowledge links to existing KB content
@@ -37,10 +37,10 @@ Present a structured daily digest:
 ### Review Suggestions
 - Topics from recent study sessions with low scores (if available)
 - Topics ingested but not yet studied or explored
-- Entities that were recently added but lack relations (good candidates for `/teach`)
+- Wiki pages that were recently added but have few backlinks (good candidates for `/teach`)
 
 ### Quick Stats
-- Total KB size (articles, entities, facts)
+- Total KB size (articles, wiki pages)
 - Growth since last digest (if previous digest data is available)
 
 ## Gotchas

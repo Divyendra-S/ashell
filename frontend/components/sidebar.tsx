@@ -189,8 +189,8 @@ export function Sidebar() {
           </p>
           <div className="grid grid-cols-2 gap-1.5 px-1">
             {[
-              { label: "Concepts", value: stats.entity_count },
-              { label: "Facts", value: stats.fact_count },
+              { label: "Concepts", value: stats.concept_count },
+              { label: "Links", value: stats.backlink_count },
               { label: "Articles", value: stats.article_count },
               { label: "Streak", value: streak?.current ?? 0, suffix: "d" },
             ].map((item) => (
@@ -256,7 +256,7 @@ export function Sidebar() {
                 {userId}
               </span>
               <button
-                onClick={() => { logout(); router.push("/login"); }}
+                onClick={async () => { await logout(); router.push("/login"); }}
                 className="text-text-tertiary transition-colors duration-200 hover:text-text-secondary"
                 title="Logout"
               >

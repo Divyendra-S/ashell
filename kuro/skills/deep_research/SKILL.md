@@ -19,7 +19,7 @@ You are performing a deep research task. Follow this multi-pass workflow:
 
 ## Pass 2: Retrieve
 - For each sub-question, perform a separate retrieval using available tools
-- Use `get_facts_for_entity`, `get_relations_for_entity`, and `traverse_relations` to explore the knowledge graph
+- Use `grep_wiki` to search across wiki pages, then `read_wiki_page` to load relevant pages and follow `[[backlinks]]`
 - Use `grep_articles` and `read_article` to find relevant article content
 - Cast a wide net — retrieve more than you think you need
 
@@ -42,13 +42,13 @@ Always cite which article or entity each claim comes from. If the KB lacks infor
 After completing the report:
 - Save detailed log using `append_skill_data` to `research_log.jsonl`:
   - `{"query": "...", "date": "...", "sub_questions": [...], "sources_used": [...], "gaps_found": [...]}`
-- Also use `save_memory` to update the user's memory with a summary:
+- Also use `update_memories` to update the user's memory with a summary:
   - name: `research_{topic}_latest`, type: `context`
   - content: "Researched {topic} ({date}). Key findings: {summary}. Gaps: {list}. Sources: {count} articles, {count} entities."
   - This helps future research sessions build on past findings without re-reading logs
 
 ## Gotchas
-- **Never fabricate connections.** If two entities aren't linked in the knowledge graph, don't invent a relationship. State "no direct connection found in KB" instead.
-- **Sparse graphs are normal.** If the KB only has 1-2 sources on a sub-question, say so in the Gaps section rather than over-interpreting thin data.
+- **Never fabricate connections.** If two topics aren't linked via wiki backlinks, don't invent a relationship. State "no direct connection found in KB" instead.
+- **Sparse wikis are normal.** If the KB only has 1-2 sources on a sub-question, say so in the Gaps section rather than over-interpreting thin data.
 - **Use `read_article` for depth.** Chunk-based retrieval may miss important context. When a chunk looks relevant, load the full article before synthesizing.
 - For the report format, see `report_template.md` in this skill folder.

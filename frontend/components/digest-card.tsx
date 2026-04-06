@@ -16,7 +16,7 @@ export function DigestCard({ userId }: { userId: string }) {
 
   if (dismissed || loading || !digest) return null;
 
-  const hasContent = digest.recent_entities.length > 0 || digest.recent_articles.length > 0 || digest.pending_goals.length > 0 || digest.study_suggestion;
+  const hasContent = digest.recent_concepts.length > 0 || digest.recent_articles.length > 0 || digest.pending_goals.length > 0 || digest.study_suggestion;
   if (!hasContent && digest.streak.current === 0) return null;
 
   async function handleCompleteGoal(goalId: number) {
@@ -47,14 +47,14 @@ export function DigestCard({ userId }: { userId: string }) {
       </div>
 
       {/* Recent additions */}
-      {(digest.recent_entities.length > 0 || digest.recent_articles.length > 0) && (
+      {(digest.recent_concepts.length > 0 || digest.recent_articles.length > 0) && (
         <div className="mb-4">
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Recently Added</p>
           <div className="space-y-1.5">
-            {digest.recent_entities.slice(0, 3).map((e, i) => (
+            {digest.recent_concepts.slice(0, 3).map((c, i) => (
               <p key={i} className="flex items-center gap-1.5 text-[12px] text-text-secondary">
-                <span className="rounded bg-surface-2/30 px-1.5 py-[1px] text-[9px] text-text-tertiary">{e.entity_type}</span>
-                {e.name}
+                <span className="rounded bg-surface-2/30 px-1.5 py-[1px] text-[9px] text-text-tertiary">concept</span>
+                {c.name}
               </p>
             ))}
             {digest.recent_articles.map((a, i) => (

@@ -2,15 +2,14 @@ import asyncio
 import logging
 import re
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from kuro.agents.ingest import ingest, ingest_streaming
-from kuro.agents.query import query, query_streaming
-from kuro.cli import classify, SLASH_CMD_PATTERN
-from kuro.memory import store, checkin_store
+from kuro.agents.unified import chat, chat_streaming
+from kuro.cli import detect_skill, SLASH_CMD_PATTERN
+from kuro.memory import store, wiki, checkin_store
 from kuro.skills import load_skills, get_skill
 
 logging.basicConfig(level=logging.INFO)
@@ -19,34 +18,38 @@ app = FastAPI(title="Kuro API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "chrome-extension://*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+class HistoryMessage(BaseModel):
+    role: str  # "user" or "kuro"
+    text: str
+
+
 class ChatRequest(BaseModel):
     message: str
     user_id: str = "default"
     skill: str | None = None
+    history: list[HistoryMessage] = []
 
 
-class IngestRequest(BaseModel):
-    text: str
+class IngestArticleRequest(BaseModel):
+    url: str
+    title: str
+    content: str
+    topic: str = "general"
     user_id: str = "default"
-
-
-class QueryRequest(BaseModel):
-    question: str
-    user_id: str = "default"
+    auto_extract: bool = False
 
 
 class NoteRequest(BaseModel):
     content: str
     user_id: str = "default"
-    entity_id: int | None = None
-    article_id: int | None = None
+    concept_slug: str | None = None
 
 
 @app.get("/api/health")
@@ -54,43 +57,31 @@ def health():
     return {"status": "ok"}
 
 
+# --- Chat ---
+
+
 @app.post("/api/chat")
-def chat(req: ChatRequest):
+def chat_endpoint(req: ChatRequest):
     skill = req.skill
     message = req.message
 
     if skill:
-        # Explicit skill from frontend — strip slash prefix if present
         slash = SLASH_CMD_PATTERN.match(message)
         if slash:
             message = slash.group(2).strip() or message
-        skill_data = get_skill(skill)
-        mode = skill_data.get("mode", "query") if skill_data else "query"
     else:
-        mode, skill = classify(message)
+        skill = detect_skill(message)
         if skill:
             slash = SLASH_CMD_PATTERN.match(message)
             if slash:
                 message = slash.group(2).strip() or message
 
-    if mode == "query":
-        response = query(message, user_id=req.user_id, skill=skill)
-    else:
-        # For ingest-url skill, pass instructions to ingest agent
-        skill_instructions = None
-        if skill:
-            skill_data = get_skill(skill)
-            if skill_data:
-                skill_instructions = f"## Active Skill: /{skill_data['name']}\n{skill_data['body']}"
-        response = ingest(message, user_id=req.user_id, skill_instructions=skill_instructions, skill_name=skill)
-        # Auto-rebuild communities after ingestion
-        try:
-            from kuro.memory.communities import rebuild_communities
-            rebuild_communities(req.user_id)
-        except Exception as e:
-            logging.getLogger("kuro.api").warning(f"Community rebuild failed: {e}")
-
-    return {"response": response, "mode": mode, "skill": skill}
+    history = [
+        {"role": "user" if m.role == "user" else "model", "parts": [{"text": m.text}]}
+        for m in req.history if m.text.strip()
+    ]
+    response = chat(message, history=history or None, user_id=req.user_id, skill=skill)
+    return {"response": response, "skill": skill}
 
 
 @app.post("/api/chat/stream")
@@ -104,42 +95,28 @@ def chat_stream(req: ChatRequest):
         slash = SLASH_CMD_PATTERN.match(message)
         if slash:
             message = slash.group(2).strip() or message
-        skill_data = get_skill(skill)
-        mode = skill_data.get("mode", "query") if skill_data else "query"
     else:
-        mode, skill = classify(message)
+        skill = detect_skill(message)
         if skill:
             slash = SLASH_CMD_PATTERN.match(message)
             if slash:
                 message = slash.group(2).strip() or message
 
+    history = [
+        {"role": "user" if m.role == "user" else "model", "parts": [{"text": m.text}]}
+        for m in req.history if m.text.strip()
+    ]
+
     def generate():
         try:
-            if mode == "query":
-                stream = query_streaming(message, user_id=req.user_id, skill=skill)
-            else:
-                skill_instructions = None
-                if skill:
-                    sd = get_skill(skill)
-                    if sd:
-                        skill_instructions = f"## Active Skill: /{sd['name']}\n{sd['body']}"
-                stream = ingest_streaming(message, user_id=req.user_id, skill_instructions=skill_instructions, skill_name=skill)
-
+            stream = chat_streaming(message, history=history or None, user_id=req.user_id, skill=skill)
             for event_type, data in stream:
                 if event_type == "step":
                     yield f"event: step\ndata: {_json.dumps(data)}\n\n"
                 elif event_type == "delta":
                     yield f"event: delta\ndata: {_json.dumps({'text': data})}\n\n"
 
-            # After ingest, rebuild communities
-            if mode != "query":
-                try:
-                    from kuro.memory.communities import rebuild_communities
-                    rebuild_communities(req.user_id)
-                except Exception as e:
-                    logging.getLogger("kuro.api").warning(f"Community rebuild failed: {e}")
-
-            yield f"event: done\ndata: {_json.dumps({'mode': mode, 'skill': skill})}\n\n"
+            yield f"event: done\ndata: {_json.dumps({'skill': skill})}\n\n"
         except Exception as e:
             logging.getLogger("kuro.api").error(f"Stream error: {e}")
             yield f"event: error\ndata: {_json.dumps({'message': str(e)})}\n\n"
@@ -151,16 +128,7 @@ def chat_stream(req: ChatRequest):
     )
 
 
-@app.post("/api/ingest")
-def ingest_endpoint(req: IngestRequest):
-    response = ingest(req.text, user_id=req.user_id)
-    return {"response": response}
-
-
-@app.post("/api/query")
-def query_endpoint(req: QueryRequest):
-    answer = query(req.question, user_id=req.user_id)
-    return {"answer": answer}
+# --- Skills ---
 
 
 @app.get("/api/skills")
@@ -174,107 +142,192 @@ def list_skills_endpoint():
     }
 
 
-@app.get("/api/entities")
-def list_entities(search: str | None = None, user_id: str = "default"):
-    if search:
-        entities = store.search_entities(search, user_id=user_id)
-    else:
-        entities = store.supabase.table("entities").select("*").eq("user_id", user_id).execute().data
-    return {"entities": entities}
+# --- Knowledge Graph (wiki-based) ---
 
 
 @app.get("/api/graph")
-def graph_endpoint(user_id: str = "default", types: str | None = "topic"):
-    entity_types = types.split(",") if types else None
-    return store.get_full_graph(user_id, entity_types=entity_types)
+def graph_endpoint(user_id: str = "default"):
+    return wiki.build_graph(user_id)
 
 
-@app.get("/api/stats")
-def stats_endpoint(user_id: str = "default"):
-    return store.get_stats(user_id)
-
-
-@app.get("/api/stats/growth")
-def growth_endpoint(user_id: str = "default", days: int = 30):
-    return {"data": store.get_growth_data(user_id, days)}
-
-
-@app.get("/api/entity/{entity_id}")
-def entity_detail_endpoint(entity_id: int, user_id: str = "default"):
-    detail = store.get_entity_detail(entity_id, user_id)
-    if not detail:
-        return {"error": "Entity not found"}, 404
-    return detail
-
-
-@app.get("/api/articles")
-def articles_endpoint(user_id: str = "default"):
-    return {"articles": store.list_articles_enhanced(user_id)}
-
-
-@app.get("/api/progress/timeline")
-def timeline_endpoint(user_id: str = "default", days: int = 30):
-    return {"timeline": checkin_store.get_timeline(user_id, days)}
-
-
-@app.get("/api/progress/streak")
-def streak_endpoint(user_id: str = "default"):
-    return checkin_store.get_streak(user_id)
-
-
-@app.patch("/api/goals/{entry_id}/complete")
-def complete_goal_endpoint(entry_id: int, user_id: str = "default"):
-    result = checkin_store.complete_goal(entry_id, user_id)
-    if not result:
-        return {"error": "Goal not found"}, 404
-    return result
-
-
-@app.get("/api/digest")
-def digest_endpoint(user_id: str = "default"):
-    return checkin_store.get_digest(user_id)
-
-
-@app.get("/api/concept/{entity_id}")
-def concept_detail_endpoint(entity_id: int, user_id: str = "default"):
-    detail = store.get_concept_detail(entity_id, user_id)
+@app.get("/api/concept/{slug}")
+def concept_detail_endpoint(slug: str, user_id: str = "default"):
+    detail = wiki.get_concept_detail(user_id, slug)
     if not detail:
         return {"error": "Concept not found"}, 404
     return detail
 
 
+# --- Stats (wiki + articles) ---
+
+
+@app.get("/api/stats")
+def stats_endpoint(user_id: str = "default"):
+    wiki_stats = wiki.get_wiki_stats(user_id)
+    article_count = 0
+    new_articles_7d = 0
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    try:
+        article_count = len(store.list_articles(user_id=user_id))
+        articles = store.supabase.table("articles").select("id").eq("user_id", user_id).gte("created_at", cutoff).execute().data
+        new_articles_7d = len(articles)
+    except Exception:
+        pass
+    return {
+        "concept_count": wiki_stats["concept_count"],
+        "backlink_count": wiki_stats["backlink_count"],
+        "article_count": article_count,
+        "new_concepts_7d": wiki_stats["new_concepts_7d"],
+        "new_articles_7d": new_articles_7d,
+        "health_score": wiki_stats["health_score"],
+    }
+
+
+@app.get("/api/stats/growth")
+def growth_endpoint(user_id: str = "default", days: int = 30):
+    try:
+        wiki_growth = wiki.get_growth_data(user_id, days)
+    except Exception:
+        wiki_growth = []
+    # Merge article growth from Supabase
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        articles = store.supabase.table("articles").select("created_at").eq("user_id", user_id).gte("created_at", cutoff).execute().data
+        for a in articles:
+            day = a["created_at"][:10]
+            for entry in wiki_growth:
+                if entry["date"] == day:
+                    entry["articles"] = entry.get("articles", 0) + 1
+                    break
+    except Exception:
+        pass
+    # Ensure articles key exists on all entries
+    for entry in wiki_growth:
+        entry.setdefault("articles", 0)
+    return {"data": wiki_growth}
+
+
+# --- Articles ---
+
+
+@app.get("/api/articles")
+def articles_endpoint(user_id: str = "default"):
+    try:
+        return {"articles": store.list_articles_enhanced(user_id)}
+    except Exception:
+        return {"articles": []}
+
+
+@app.get("/api/check-article")
+def check_article(url: str, user_id: str = "default"):
+    existing = store.get_article_by_url(url)
+    if existing and existing.get("user_id") == user_id:
+        return {"saved": True, "article_id": existing["id"]}
+    return {"saved": False}
+
+
+@app.post("/api/ingest-article")
+def ingest_article(req: IngestArticleRequest):
+    from kuro.memory import files
+
+    # Check for duplicate (same URL + same user)
+    existing = store.get_article_by_url(req.url)
+    if existing and existing.get("user_id") == req.user_id:
+        return {"article_id": existing["id"], "file_path": existing.get("file_path", ""), "duplicate": True}
+
+    # 1. Save article content to wiki_pages
+    file_path = files.save_article(req.title, req.content, req.topic, req.user_id)
+
+    # 2. Generate retrieval-optimized summary via LLM
+    from kuro.core.llm import generate_article_summary
+    summary = generate_article_summary(req.title, req.content)
+
+    # 3. Save metadata + summary to articles table
+    row = store.insert_article(req.url, req.title, file_path, user_id=req.user_id, summary=summary)
+
+    # 3. Optionally auto-extract concepts via agent
+    if req.auto_extract:
+        try:
+            chat(
+                f"I just saved this article: '{req.title}'. "
+                f"Read it from '{file_path}' and extract the key concepts into wiki pages. "
+                f"For each concept: write a clear summary that explains what it is and WHY it matters, "
+                f"include concrete examples and practical details from the article (not just definitions), "
+                f"add specific gotchas or best practices mentioned, "
+                f"and connect concepts with [[backlinks]]. "
+                f"Make each concept page genuinely useful as a reference — someone reading it should "
+                f"learn the key insights without needing to re-read the original article.",
+                user_id=req.user_id,
+            )
+        except Exception as e:
+            logging.getLogger("kuro.api").warning(f"Auto-extract failed: {e}")
+
+    return {"article_id": row["id"], "file_path": file_path, "duplicate": False}
+
+
+# --- Progress (unchanged, from checkin_store) ---
+
+
+@app.get("/api/progress/timeline")
+def timeline_endpoint(user_id: str = "default", days: int = 30):
+    try:
+        return {"timeline": checkin_store.get_timeline(user_id, days)}
+    except Exception:
+        return {"timeline": []}
+
+
+@app.get("/api/progress/streak")
+def streak_endpoint(user_id: str = "default"):
+    try:
+        return checkin_store.get_streak(user_id)
+    except Exception:
+        return {"current": 0, "longest": 0, "total_active_days": 0}
+
+
+@app.patch("/api/goals/{entry_id}/complete")
+def complete_goal_endpoint(entry_id: int, user_id: str = "default"):
+    try:
+        result = checkin_store.complete_goal(entry_id, user_id)
+        if not result:
+            return {"error": "Goal not found"}, 404
+        return result
+    except Exception:
+        return {"error": "Database unavailable"}, 503
+
+
+@app.get("/api/digest")
+def digest_endpoint(user_id: str = "default"):
+    try:
+        return checkin_store.get_digest(user_id)
+    except Exception:
+        return {"streak": {"current": 0, "longest": 0, "total_active_days": 0}, "recent_concepts": [], "recent_articles": [], "pending_goals": [], "study_suggestion": None, "kb_suggestions": []}
+
+
+# --- Notes (wiki-based, append to concept page) ---
+
+
 @app.post("/api/notes")
 def create_note(req: NoteRequest):
-    return store.insert_note(req.user_id, req.content, req.entity_id, req.article_id)
+    if not req.concept_slug:
+        return {"error": "concept_slug is required"}, 400
+    content = wiki.read_page(req.user_id, f"concepts/{req.concept_slug}.md")
+    if content is None:
+        return {"error": f"Concept '{req.concept_slug}' not found"}, 404
 
+    # Append to ## Notes section or create it
+    from datetime import datetime, timezone
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    note_line = f"- {req.content} [{timestamp}]"
 
-@app.get("/api/notes")
-def list_notes(entity_id: int | None = None, article_id: int | None = None, user_id: str = "default"):
-    if entity_id is not None:
-        return {"notes": store.get_notes_for_entity(entity_id)}
-    if article_id is not None:
-        return {"notes": store.get_notes_for_article(article_id)}
-    return {"notes": []}
+    if "## Notes" in content:
+        content = content.rstrip() + "\n" + note_line + "\n"
+    else:
+        content = content.rstrip() + "\n\n## Notes\n" + note_line + "\n"
 
-
-@app.delete("/api/notes/{note_id}")
-def delete_note_endpoint(note_id: int, user_id: str = "default"):
-    success = store.delete_note(note_id, user_id)
-    return {"deleted": success}
-
-
-# --- Communities ---
-
-@app.post("/api/communities/rebuild")
-def rebuild_communities_endpoint(user_id: str = "default"):
-    from kuro.memory.communities import rebuild_communities
-    return rebuild_communities(user_id)
-
-
-@app.get("/api/communities")
-def list_communities_endpoint(user_id: str = "default"):
-    from kuro.memory.communities import get_communities
-    return {"communities": get_communities(user_id)}
+    wiki.write_page(req.user_id, f"concepts/{req.concept_slug}.md", content)
+    return {"status": "saved", "concept_slug": req.concept_slug}
 
 
 # --- Voice Agent (Pipecat SmallWebRTC) ---
@@ -297,7 +350,6 @@ async def _on_webrtc_connection(connection):
     from pipecat.pipeline.runner import PipelineRunner
     from kuro.agents.voice import create_voice_pipeline, _generate_session_summary
 
-    # Extract user_id from the request data passed via the client
     user_id = getattr(connection, "_kuro_user_id", "default")
 
     transport = SmallWebRTCTransport(
@@ -329,10 +381,7 @@ async def _on_webrtc_connection(connection):
 
 @app.post("/api/offer")
 async def webrtc_offer(request: Request):
-    """Handle WebRTC SDP offer from the client SDK."""
     body = await request.json()
-
-    # Extract user_id from requestData before creating connection
     request_data = body.get("requestData") or body.get("request_data") or {}
     user_id = request_data.get("user_id", "default")
 
@@ -344,7 +393,6 @@ async def webrtc_offer(request: Request):
         request_data=request_data,
     )
 
-    # Wrap the callback to inject user_id onto the connection
     async def connection_callback(connection):
         connection._kuro_user_id = user_id
         await _on_webrtc_connection(connection)
@@ -355,7 +403,6 @@ async def webrtc_offer(request: Request):
 
 @app.patch("/api/offer")
 async def webrtc_ice_candidate(request: Request):
-    """Handle WebRTC ICE candidates from the client SDK."""
     body = await request.json()
     patch_request = SmallWebRTCPatchRequest(
         pc_id=body["pc_id"],
@@ -367,6 +414,5 @@ async def webrtc_ice_candidate(request: Request):
 
 @app.get("/api/voice/sessions")
 def voice_sessions(user_id: str = "default", limit: int = 7):
-    """Get recent check-in sessions for a user."""
     sessions = checkin_store.get_recent_sessions(user_id, limit=limit)
     return {"sessions": sessions}

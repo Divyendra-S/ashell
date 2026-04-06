@@ -4,40 +4,30 @@ import { useState, useEffect, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useUser } from "../../../lib/user";
-import { getEntityDetail, type EntityDetail } from "../../../lib/api";
-
-const TYPE_COLORS: Record<string, string> = {
-  person: "bg-[#818cf8]/10 text-[#818cf8]/80",
-  company: "bg-[#f472b6]/10 text-[#f472b6]/80",
-  project: "bg-[#34d399]/10 text-[#34d399]/80",
-  topic: "bg-[#fbbf24]/10 text-[#fbbf24]/80",
-  place: "bg-[#60a5fa]/10 text-[#60a5fa]/80",
-  event: "bg-[#fb923c]/10 text-[#fb923c]/80",
-};
+import { getConceptDetail, type ConceptDetail } from "../../../lib/api";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 }
 
 export default function EntityPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id: idStr } = use(params);
-  const entityId = parseInt(idStr, 10);
+  const { id: slug } = use(params);
   const { userId } = useUser();
   const router = useRouter();
-  const [entity, setEntity] = useState<EntityDetail | null>(null);
+  const [concept, setConcept] = useState<ConceptDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userId) { router.push("/login"); return; }
     setLoading(true);
-    getEntityDetail(entityId, userId)
-      .then(setEntity)
+    getConceptDetail(slug, userId)
+      .then(setConcept)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [entityId, userId, router]);
+  }, [slug, userId, router]);
 
-  const navigateToEntity = useCallback((id: number) => router.push(`/entity/${id}`), [router]);
+  const navigateToConcept = useCallback((s: string) => router.push(`/entity/${s}`), [router]);
 
   const prefillChat = useCallback((skill: string, topic: string) => {
     sessionStorage.setItem("kuro_prefill", `/${skill} ${topic}`);
@@ -57,11 +47,11 @@ export default function EntityPage({ params }: { params: Promise<{ id: string }>
     );
   }
 
-  if (error || !entity) {
+  if (error || !concept) {
     return (
       <div className="flex h-full items-center justify-center bg-surface-0">
         <div className="text-center">
-          <p className="text-[13px] text-text-tertiary">{error || "Entity not found"}</p>
+          <p className="text-[13px] text-text-tertiary">{error || "Concept not found"}</p>
           <button onClick={() => router.push("/dashboard")} className="mt-4 text-[12px] text-accent transition-colors hover:text-accent">
             Back to Dashboard
           </button>
@@ -70,7 +60,20 @@ export default function EntityPage({ params }: { params: Promise<{ id: string }>
     );
   }
 
-  const typeBadge = TYPE_COLORS[entity.entity_type] || "bg-surface-2/30 text-text-tertiary";
+  // Parse markdown content into sections
+  const sections = concept.content.split(/^## /m).filter(Boolean);
+  const keyFacts: string[] = [];
+  const connections: string[] = [];
+  const notes: string[] = [];
+
+  for (const section of sections) {
+    const lines = section.split("\n");
+    const heading = lines[0]?.replace(/^#+ /, "").trim();
+    const bullets = lines.slice(1).filter((l) => l.startsWith("- ")).map((l) => l.slice(2));
+    if (heading === "Key Facts") keyFacts.push(...bullets);
+    else if (heading === "Connections") connections.push(...bullets);
+    else if (heading === "Notes") notes.push(...bullets);
+  }
 
   const handleQuickAsk = (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,35 +108,27 @@ export default function EntityPage({ params }: { params: Promise<{ id: string }>
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: "easeOut" }}
             >
-              <div className="mb-2 flex items-center gap-3">
-                <h1 className="text-2xl font-extralight tracking-tight text-text-primary">{entity.name}</h1>
-                <span className={`rounded-full px-2.5 py-[3px] text-[10px] font-medium ${typeBadge}`}>
-                  {entity.entity_type}
-                </span>
-              </div>
-              {entity.summary && (
-                <p className="text-[13px] leading-[1.7] text-text-secondary">{entity.summary}</p>
+              <h1 className="mb-2 text-2xl font-extralight tracking-tight text-text-primary">{concept.name}</h1>
+              {concept.summary && (
+                <p className="text-[13px] leading-[1.7] text-text-secondary">{concept.summary}</p>
               )}
             </motion.div>
 
-            {/* Facts — bullet list */}
+            {/* Key Facts */}
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, delay: 0.06, ease: "easeOut" }}
             >
               <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
-                Facts ({entity.facts.length})
+                Key Facts ({keyFacts.length})
               </h2>
-              {entity.facts.length > 0 ? (
+              {keyFacts.length > 0 ? (
                 <ul className="space-y-2">
-                  {entity.facts.map((fact) => (
-                    <li key={fact.id} className="flex gap-2.5 text-[13px] leading-[1.65] text-text-secondary">
+                  {keyFacts.map((fact, i) => (
+                    <li key={i} className="flex gap-2.5 text-[13px] leading-[1.65] text-text-secondary">
                       <span className="mt-[9px] h-[3px] w-[3px] shrink-0 rounded-full bg-accent/40" />
-                      <div>
-                        <span>{fact.content}</span>
-                        <span className="ml-2 text-[10px] text-text-tertiary">{fact.source} · {formatDate(fact.created_at)}</span>
-                      </div>
+                      <span>{fact.replace(/\[\[([^\]]+)\]\]/g, "$1")}</span>
                     </li>
                   ))}
                 </ul>
@@ -142,38 +137,50 @@ export default function EntityPage({ params }: { params: Promise<{ id: string }>
               )}
             </motion.div>
 
-            {/* Relations — pills */}
+            {/* Connections — pills */}
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, delay: 0.12, ease: "easeOut" }}
             >
               <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
-                Relations ({entity.relations.length})
+                Connections ({concept.backlinks.length})
               </h2>
-              {entity.relations.length > 0 ? (
+              {concept.backlinks.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
-                  {entity.relations.map((rel) => {
-                    const isSource = rel.source_id === entityId;
-                    const otherName = isSource ? rel.target_name : rel.source_name;
-                    const otherId = isSource ? rel.target_id : rel.source_id;
-                    return (
-                      <button
-                        key={rel.id}
-                        onClick={() => navigateToEntity(otherId)}
-                        className="flex items-center gap-1.5 rounded-full border border-surface-2/35 px-3 py-[5px] text-[11px] text-text-secondary transition-all duration-200 hover:border-accent/25 hover:text-accent/90"
-                      >
-                        <span className="text-text-tertiary">{rel.relation_type}</span>
-                        <span className="text-text-tertiary">·</span>
-                        <span className="font-medium">{otherName}</span>
-                      </button>
-                    );
-                  })}
+                  {concept.backlinks.map((bl) => (
+                    <button
+                      key={bl.slug}
+                      onClick={() => navigateToConcept(bl.slug)}
+                      className="flex items-center gap-1.5 rounded-full border border-surface-2/35 px-3 py-[5px] text-[11px] text-text-secondary transition-all duration-200 hover:border-accent/25 hover:text-accent/90"
+                    >
+                      <span className="font-medium">{bl.name}</span>
+                    </button>
+                  ))}
                 </div>
               ) : (
-                <p className="text-[12px] text-text-tertiary">No relations yet.</p>
+                <p className="text-[12px] text-text-tertiary">No connections yet.</p>
               )}
             </motion.div>
+
+            {/* Notes */}
+            {notes.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: 0.15, ease: "easeOut" }}
+              >
+                <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Notes</h2>
+                <ul className="space-y-2">
+                  {notes.map((note, i) => (
+                    <li key={i} className="flex gap-2.5 text-[13px] leading-[1.65] text-text-secondary">
+                      <span className="mt-[7px] text-[10px] text-mode-ingest/40">~</span>
+                      <span>{note}</span>
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
+            )}
 
             {/* Actions */}
             <motion.div
@@ -190,7 +197,7 @@ export default function EntityPage({ params }: { params: Promise<{ id: string }>
                 ].map((action) => (
                   <button
                     key={action.skill}
-                    onClick={() => prefillChat(action.skill, entity.name)}
+                    onClick={() => prefillChat(action.skill, concept.name)}
                     className="rounded-full border border-surface-2/35 px-4 py-2 text-[12px] text-text-tertiary transition-all duration-200 hover:border-accent/25 hover:text-text-secondary"
                   >
                     {action.label}
@@ -209,7 +216,7 @@ export default function EntityPage({ params }: { params: Promise<{ id: string }>
                 <input
                   name="question"
                   type="text"
-                  placeholder={`Ask about ${entity.name}...`}
+                  placeholder={`Ask about ${concept.name}...`}
                   className="flex-1 rounded-xl border border-surface-2/30 bg-surface-05 px-4 py-2.5 text-[13px] text-text-primary placeholder-text-tertiary outline-none transition-all duration-200 focus:border-accent/30 focus:bg-surface-1"
                 />
                 <button
@@ -231,22 +238,16 @@ export default function EntityPage({ params }: { params: Promise<{ id: string }>
           >
             <div className="sticky top-8 space-y-5 rounded-2xl border border-surface-2/30 bg-surface-05 p-5">
               <div>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Type</p>
-                <span className={`inline-block rounded-full px-2.5 py-[3px] text-[10px] font-medium ${typeBadge}`}>
-                  {entity.entity_type}
-                </span>
-              </div>
-              <div>
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Created</p>
-                <p className="text-[12px] text-text-secondary">{formatDate(entity.created_at)}</p>
+                <p className="text-[12px] text-text-secondary">{formatDate(concept.created_at)}</p>
               </div>
               <div>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Facts</p>
-                <p className="text-[18px] font-extralight text-text-primary">{entity.facts.length}</p>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Key Facts</p>
+                <p className="text-[18px] font-extralight text-text-primary">{keyFacts.length}</p>
               </div>
               <div>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Relations</p>
-                <p className="text-[18px] font-extralight text-text-primary">{entity.relations.length}</p>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">Connections</p>
+                <p className="text-[18px] font-extralight text-text-primary">{concept.backlinks.length}</p>
               </div>
             </div>
           </motion.div>

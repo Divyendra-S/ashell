@@ -1,0 +1,21 @@
+# Wiki Index
+
+- [[Austin Tedesco]] — Head of Growth at Every and writer of the food newsletter Bangers and Jams.
+- [[Compound Engineering Plugin]] — An official AI coding plugin that implements the compound engineering loop, boasting over 10,000 GitHub stars.
+- [[Compound Engineering]] — A philosophy of software engineering for the AI age that features a loop of Planning, Working, Reviewing, and Compoundin
+- [[Cora]] — An AI email tool developed by Every.
+- [[Dan Shipper]] — CEO and cofounder of Every, writer of the Chain of Thought column, and host of the AI & I podcast.
+- [[Every]] — A company and publication that explores AI, offers a subscription, and builds AI productivity tools.
+- [[FeatureBase]] — A platform where users submit and upvote product ideas.
+- [[Gemini API]] — An AI model API used for providing intelligence to applications.
+- [[Katie Parrott]] — Staff writer and AI editorial lead at Every who authored the Compound Engineering Camp article.
+- [[Kieran Klaassen]] — General manager of Cora and creator of the compound engineering framework for AI-assisted coding.
+- [[Kuro]] — A personal AI assistant with a knowledge graph and various skills.
+- [[Monologue]] — An AI voice dictation tool for Mac developed by Every.
+- [[Proof]] — An open-source, login-free online document editor built by Every for human and AI agent collaboration.
+- [[Sparkle]] — An AI tool to organize files on Mac automatically, developed by Every.
+- [[Spiral]] — An AI tool for writing and repurposing content, developed by Every.
+- [[Supabase]] — A backend-as-a-service platform used for databases and knowledge graphs.
+- [[User's Web-Searching AI Agent]] — An AI agent being built by the user that searches the web, fetches pages, and processes them efficiently using Claude AP
+- [[Crdt]] — Conflict-free Replicated Data Types (CRDTs) are data structures designed to be replicated across multiple computers or n
+- [[Vector Clocks]] — Vector clocks are a mechanism used in distributed systems to track causality and the logical ordering of events across m

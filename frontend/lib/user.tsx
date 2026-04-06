@@ -1,43 +1,83 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { supabase } from "./supabase";
 
 interface UserContextType {
   userId: string | null;
-  login: (userId: string) => void;
-  logout: () => void;
+  email: string | null;
+  login: (email: string, password: string) => Promise<void>;
+  signup: (email: string, password: string, username: string) => Promise<{ needsConfirmation: boolean }>;
+  logout: () => Promise<void>;
+  loading: boolean;
 }
 
 const UserContext = createContext<UserContextType>({
   userId: null,
-  login: () => {},
-  logout: () => {},
+  email: null,
+  login: async () => {},
+  signup: async () => ({ needsConfirmation: false }),
+  logout: async () => {},
+  loading: true,
 });
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem("kuro_user_id");
-    if (stored) setUserId(stored);
-    setLoaded(true);
+    // Check for existing Supabase session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const username = session.user.user_metadata?.username || session.user.email?.split("@")[0] || null;
+        setUserId(username);
+        setEmail(session.user.email || null);
+      }
+      setLoading(false);
+    });
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const username = session.user.user_metadata?.username || session.user.email?.split("@")[0] || null;
+        setUserId(username);
+        setEmail(session.user.email || null);
+      } else {
+        setUserId(null);
+        setEmail(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  function login(id: string) {
-    localStorage.setItem("kuro_user_id", id);
-    setUserId(id);
+  async function login(email: string, password: string) {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
   }
 
-  function logout() {
-    localStorage.removeItem("kuro_user_id");
+  async function signup(email: string, password: string, username: string) {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { username } },
+    });
+    if (error) throw error;
+    // If session exists, user is auto-confirmed
+    return { needsConfirmation: !data.session };
+  }
+
+  async function logout() {
+    await supabase.auth.signOut();
     setUserId(null);
+    setEmail(null);
   }
 
-  if (!loaded) return null;
+  if (loading) return null;
 
   return (
-    <UserContext.Provider value={{ userId, login, logout }}>
+    <UserContext.Provider value={{ userId, email, login, signup, logout, loading }}>
       {children}
     </UserContext.Provider>
   );

@@ -16,6 +16,4 @@ dependencies = [
     "uvicorn>=0.41.0",
     "pyyaml>=6.0",
     "pipecat-ai[google,groq,webrtc]>=0.0.60",
-    "igraph>=0.11",
-    "leidenalg>=0.10",
 ]

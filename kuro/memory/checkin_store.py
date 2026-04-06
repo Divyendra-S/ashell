@@ -174,20 +174,22 @@ def get_timeline(user_id: str = "default", days: int = 30) -> list[dict]:
             "data": {"title": a["title"], "url": a.get("url")},
         })
 
-    # Entities created
-    entities = (
-        supabase.table("entities")
-        .select("id, name, entity_type, created_at")
+    # Wiki concept pages created
+    concept_rows = (
+        supabase.table("wiki_pages")
+        .select("path, created_at")
         .eq("user_id", user_id)
+        .like("path", "concepts/%")
         .gte("created_at", cutoff)
         .order("created_at", desc=True)
         .execute()
     ).data
-    for e in entities:
+    for row in concept_rows:
+        name = row["path"].split("/")[-1].replace(".md", "").replace("-", " ").title()
         timeline.append({
-            "type": "entity",
-            "date": e["created_at"],
-            "data": {"name": e["name"], "entity_type": e["entity_type"]},
+            "type": "concept",
+            "date": row["created_at"],
+            "data": {"name": name},
         })
 
     # Goals set/completed
@@ -229,9 +231,9 @@ def get_streak(user_id: str = "default") -> dict:
     for a in articles:
         activity_dates.add(a["created_at"][:10])
 
-    entities = supabase.table("entities").select("created_at").eq("user_id", user_id).execute().data
-    for e in entities:
-        activity_dates.add(e["created_at"][:10])
+    concept_rows = supabase.table("wiki_pages").select("created_at").eq("user_id", user_id).like("path", "concepts/%").execute().data
+    for row in concept_rows:
+        activity_dates.add(row["created_at"][:10])
 
     # Calculate streak
     streak = 0
@@ -271,16 +273,21 @@ def get_digest(user_id: str = "default") -> dict:
 
     cutoff_48h = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
 
-    # Recent additions
-    recent_entities = (
-        supabase.table("entities")
-        .select("name, entity_type")
+    # Recent concept pages
+    recent_concept_rows = (
+        supabase.table("wiki_pages")
+        .select("path")
         .eq("user_id", user_id)
+        .like("path", "concepts/%")
         .gte("created_at", cutoff_48h)
         .order("created_at", desc=True)
         .limit(5)
         .execute()
     ).data
+    recent_concepts = [
+        {"name": row["path"].split("/")[-1].replace(".md", "").replace("-", " ").title()}
+        for row in recent_concept_rows
+    ]
 
     recent_articles = (
         supabase.table("articles")
@@ -319,7 +326,7 @@ def get_digest(user_id: str = "default") -> dict:
 
     return {
         "streak": streak_data,
-        "recent_entities": recent_entities,
+        "recent_concepts": recent_concepts,
         "recent_articles": recent_articles,
         "pending_goals": [{"id": g["id"], "content": g["content"], "created_at": g["created_at"]} for g in pending_goals],
         "study_suggestion": study_suggestion,

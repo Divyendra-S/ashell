@@ -1,7 +1,6 @@
 ---
 name: ingest-url
 description: Enhanced URL ingestion with thorough entity and fact extraction
-mode: ingest
 triggers:
   - "save this article"
   - "ingest this"
@@ -22,39 +21,32 @@ You are performing thorough knowledge extraction from a URL. Follow this workflo
 - Choose an appropriate topic category
 
 ## Step 3: Deep Extraction
-Extract ALL of the following from the article content:
+Extract ALL of the following from the article content and create wiki pages:
 
 ### Concepts & Topics
 - Focus on extracting study-worthy concepts, techniques, methodologies, and ideas
-- Use entity_type "topic" for all concepts
 - Extract the main topic, sub-topics, and related theoretical ideas
-- Only create person/company entities if they ARE the subject of study (not just mentioned)
+- Only create pages for people/companies if they ARE the subject of study (not just mentioned)
 - Examples of good concepts: "Prompt Caching", "Graph Regularization", "Force-Directed Layout", "Command Validation"
 - Examples of bad extractions: "Google" (company mentioned in passing), "John Smith" (person referenced)
 
-### Facts
-- Extract key facts about each concept
-- Store each with `store_fact`, linking to the correct concept
-- Aim for 3-5 facts per major concept, 1-2 for minor ones
-- Focus on facts useful for studying and understanding
-
-### Relations (Concept Hierarchy)
-- Use "subtopic_of" to build concept hierarchies (e.g. "Batch Normalization" subtopic_of "Neural Network Training")
-- Use "related_to" for lateral connections between concepts
-- Use "requires", "enables", "builds_on" for dependency relationships
-- Use "contrasts_with" for opposing approaches
-- Include context for non-obvious relationships
+### Write Wiki Pages
+- Use `write_wiki_page` for each major concept extracted
+- Each page should contain: a brief definition, key facts (3-5 for major concepts, 1-2 for minor ones), and `[[backlinks]]` to related concept pages
+- Build concept hierarchies via backlinks (e.g. the "Batch Normalization" page links to `[[Neural Network Training]]`)
+- Use backlinks for relationships: subtopic, related, requires, enables, builds_on, contrasts_with
+- Include context for non-obvious relationships inline on the page
 
 ## Step 4: Confirm
 Provide a summary of everything extracted:
 - Article title and topic
-- Number of entities, facts, and relations stored
-- List of key entities extracted
-- Any notable connections discovered
+- Number of wiki pages created
+- List of key concepts extracted
+- Any notable connections discovered via backlinks
 
 Be thorough — the goal is to make every piece of knowledge in this article retrievable later.
 
 ## Gotchas
 - **Some sites block scraping.** If `scrape_url` returns an error or empty content, tell the user to paste the article content directly instead of retrying.
-- **Don't create duplicate entities.** Before calling `store_entity`, check if the entity might already exist in the KB using `get_facts_for_entity`. If it does, add new facts/relations to the existing entity rather than creating a duplicate.
+- **Don't create duplicate pages.** Before calling `write_wiki_page`, check if the page already exists using `read_wiki_page`. If it does, merge new content into the existing page rather than overwriting it.
 - **Quality over quantity for facts.** Extract meaningful, specific facts — not trivial ones like "X is a company" when the article is about X's product launch.

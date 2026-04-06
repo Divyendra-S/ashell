@@ -41,6 +41,60 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return [e["values"] for e in resp.json()["embeddings"]]
 
 
+_SUMMARY_PROMPT = """\
+You are an indexing assistant for a personal knowledge base. Given an article, write a concise summary (2-3 sentences, max 250 chars) that helps an AI agent decide whether to read this article when answering user questions.
+
+Your summary MUST:
+- State the core topic and key concepts covered
+- Mention specific techniques, tools, or frameworks discussed
+- Use concrete terms a user would search for (not vague words like "explores" or "discusses")
+
+Your summary MUST NOT:
+- Include author bios, publication info, or dates
+- Start with "This article..." — just state what it covers
+- Include markdown formatting or links
+
+Examples of GOOD summaries:
+- "How to compose skills and subagents in Claude Code: preloading skills via frontmatter, delegating heavy tasks to subagents, progressive disclosure pattern for folder-based context engineering."
+- "Prompt caching in Claude API: automatic vs explicit cache breakpoints, TTL behavior, cost savings for multi-turn conversations and repetitive prompts."
+
+Examples of BAD summaries:
+- "Dan Shipper explores AI tools and their implications for the future of work." (too vague)
+- "This article discusses various aspects of programming." (says nothing)
+"""
+
+FLASH_MODEL = "gemini-2.5-flash"
+FLASH_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{FLASH_MODEL}:generateContent"
+
+
+def generate_article_summary(title: str, content: str) -> str:
+    """Use Gemini Flash to generate a retrieval-optimized summary for an article."""
+    # Truncate content to first ~3000 chars — enough to capture the gist
+    truncated = content[:3000]
+    if len(content) > 3000:
+        truncated += "\n\n[... article continues ...]"
+
+    try:
+        resp = requests.post(
+            FLASH_URL,
+            headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
+            json={
+                "system_instruction": {"parts": [{"text": _SUMMARY_PROMPT}]},
+                "contents": [{"role": "user", "parts": [{"text": f"Article title: {title}\n\n{truncated}"}]}],
+            },
+        )
+        resp.raise_for_status()
+        parts = resp.json()["candidates"][0]["content"]["parts"]
+        summary = parts[0].get("text", "").strip()
+        # Cap at 300 chars
+        if len(summary) > 300:
+            summary = summary[:297] + "..."
+        return summary
+    except Exception as e:
+        log.warning(f"Summary generation failed: {e}")
+        return ""
+
+
 def call_gemini(contents: list[dict], tools: list[dict] | None = None, system_instruction: str | None = None) -> dict:
     body = {"contents": contents}
     if tools:

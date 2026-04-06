@@ -27,8 +27,6 @@ export function ArticleCard({ article }: { article: Article }) {
       <div className="flex items-center gap-2 text-[10px] text-text-tertiary">
         <span>{getDomain(article.url)}</span>
         <span className="text-text-tertiary">·</span>
-        <span>{article.chunk_count} chunks</span>
-        <span className="text-text-tertiary">·</span>
         <span>{formatDate(article.created_at)}</span>
       </div>
       {article.url && (
