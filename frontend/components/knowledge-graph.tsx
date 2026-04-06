@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useEffect, useState } from "react";
+import { useCallback, useRef, useEffect, useState, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
@@ -188,7 +188,7 @@ export function KnowledgeGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+  const hoveredNodeRef = useRef<GraphNode | null>(null);
   const hasInteracted = useRef(false);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -266,7 +266,7 @@ export function KnowledgeGraph({
   }, []);
 
   const handleNodeHover = useCallback((node: any) => {
-    setHoveredNode(node || null);
+    hoveredNodeRef.current = node || null;
   }, []);
 
   const handleAddNote = useCallback(
@@ -298,12 +298,19 @@ export function KnowledgeGraph({
     [focusNode, loadConceptDetail]
   );
 
+  const selectedNodeIdRef = useRef(selectedNodeId);
+  selectedNodeIdRef.current = selectedNodeId;
+
+  const isDarkRef = useRef(isDark);
+  isDarkRef.current = isDark;
+
   const nodeCanvasObject = useCallback(
     (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const size = Math.sqrt(node.val) * 4;
-      const isHovered = hoveredNode?.id === node.id;
-      const isSelected = selectedNodeId === node.id;
+      const isHovered = hoveredNodeRef.current?.id === node.id;
+      const isSelected = selectedNodeIdRef.current === node.id;
       const fontSize = Math.max(11 / globalScale, 1.5);
+      const dark = isDarkRef.current;
 
       if (isHovered || isSelected) {
         ctx.beginPath();
@@ -326,12 +333,12 @@ export function KnowledgeGraph({
         ctx.textBaseline = "top";
         ctx.fillStyle =
           isHovered || isSelected
-            ? isDark ? "rgba(250, 250, 250, 0.95)" : "rgba(20, 20, 30, 0.95)"
-            : isDark ? "rgba(250, 250, 250, 0.6)" : "rgba(20, 20, 30, 0.55)";
+            ? dark ? "rgba(250, 250, 250, 0.95)" : "rgba(20, 20, 30, 0.95)"
+            : dark ? "rgba(250, 250, 250, 0.6)" : "rgba(20, 20, 30, 0.55)";
         ctx.fillText(node.name, node.x, node.y + size + 3);
       }
     },
-    [hoveredNode, selectedNodeId, isDark]
+    [] // stable — reads from refs
   );
 
   const nodePointerAreaPaint = useCallback(
@@ -343,6 +350,29 @@ export function KnowledgeGraph({
     },
     []
   );
+
+  const nodes: GraphNode[] = useMemo(
+    () =>
+      data?.entities.map((e) => ({
+        id: e.id,
+        name: e.name,
+        entity_type: e.entity_type,
+        fact_count: e.fact_count,
+        val: Math.max(2, e.fact_count * 1.5 + 1),
+        color: hashColor(e.name),
+      })) ?? [],
+    [data?.entities]
+  );
+
+  const links: GraphLink[] = useMemo(() => {
+    if (!data?.relations) return [];
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    return data.relations
+      .filter((r) => nodeIds.has(r.source_id) && nodeIds.has(r.target_id))
+      .map((r) => ({ source: r.source_id, target: r.target_id, label: r.relation_type }));
+  }, [data?.relations, nodes]);
+
+  const graphDataMemo = useMemo(() => ({ nodes, links }), [nodes, links]);
 
   if (!data || !data.entities.length) {
     return (
@@ -383,20 +413,6 @@ export function KnowledgeGraph({
     );
   }
 
-  const nodes: GraphNode[] = data.entities.map((e) => ({
-    id: e.id,
-    name: e.name,
-    entity_type: e.entity_type,
-    fact_count: e.fact_count,
-    val: Math.max(2, e.fact_count * 1.5 + 1),
-    color: hashColor(e.name),
-  }));
-
-  const nodeIds = new Set(nodes.map((n) => n.id));
-  const links: GraphLink[] = data.relations
-    .filter((r) => nodeIds.has(r.source_id) && nodeIds.has(r.target_id))
-    .map((r) => ({ source: r.source_id, target: r.target_id, label: r.relation_type }));
-
   const selectedNodeColor = selectedNodeId != null
     ? nodes.find((n) => n.id === selectedNodeId)?.color
     : undefined;
@@ -424,7 +440,7 @@ export function KnowledgeGraph({
       {dimensions.width > 0 && dimensions.height > 0 && (
       <ForceGraph2D
         ref={graphRef}
-        graphData={{ nodes, links }}
+        graphData={graphDataMemo}
         width={dimensions.width}
         height={dimensions.height}
         backgroundColor={isDark ? "#0c0c0f" : "#fafafa"}

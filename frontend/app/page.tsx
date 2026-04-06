@@ -24,6 +24,21 @@ const suggestions = [
   "Remember this for later",
 ];
 
+function extractSources(steps?: ToolStep[]): string[] {
+  if (!steps) return [];
+  const sources: string[] = [];
+  const seen = new Set<string>();
+  for (const step of steps) {
+    if (step.tool === "read_article" && step.args.file_path) {
+      // Extract article title from file path like "articles/some-title.md"
+      const raw = String(step.args.file_path);
+      const name = raw.split("/").pop()?.replace(/\.md$/, "").replace(/[-_]/g, " ") ?? raw;
+      if (!seen.has(name)) { seen.add(name); sources.push(name); }
+    }
+  }
+  return sources;
+}
+
 function getGreeting(): string {
   const h = new Date().getHours();
   if (h < 12) return "Good morning";
@@ -169,15 +184,6 @@ export default function Home() {
           {messages.length === 0 && !loading ? (
             <div className="flex flex-col items-center justify-center pt-10 text-center">
               <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.35, ease: "easeOut" }}
-                className="mb-8 w-full"
-              >
-                <DigestCard userId={userId} />
-              </motion.div>
-
-              <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.35, delay: 0.05, ease: "easeOut" }}
@@ -197,10 +203,12 @@ export default function Home() {
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.35, delay: 0.15, ease: "easeOut" }}
-                className="mb-8 text-[13px] text-text-tertiary"
+                className="mb-2 text-[13px] text-text-tertiary"
               >
                 Ask a question or share knowledge to remember
               </motion.p>
+              <DigestCard userId={userId} />
+              <div className="mb-6" />
               <motion.div
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -304,6 +312,23 @@ export default function Home() {
                         {msg.streaming && msg.text && (
                           <span className="inline-block h-4 w-0.5 animate-pulse bg-accent/60" />
                         )}
+                        {!msg.streaming && (() => {
+                          const sources = extractSources(msg.steps);
+                          if (sources.length === 0) return null;
+                          return (
+                            <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-surface-2/20 pt-2.5">
+                              <span className="text-[10px] text-text-tertiary">Sources:</span>
+                              {sources.map((s) => (
+                                <span
+                                  key={s}
+                                  className="rounded-full bg-surface-2/20 px-2 py-[2px] text-[10px] text-text-tertiary"
+                                >
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </>
                     )}
                   </div>

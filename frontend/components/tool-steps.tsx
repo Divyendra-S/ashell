@@ -10,6 +10,8 @@ const TOOL_LABELS: Record<string, string> = {
   traverse_relations: "Exploring connections",
   grep_articles: "Searching articles",
   read_article: "Reading article",
+  search_knowledge: "Searching knowledge",
+  read_wiki_page: "Reading concept",
   list_articles: "Listing articles",
   save_memory: "Saving memory",
   list_memories: "Checking memories",
