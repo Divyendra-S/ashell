@@ -37,8 +37,9 @@ SYSTEM_PROMPT_TEMPLATE = (
     "{wiki_index}\n\n"
 
     "## Saved Articles\n"
-    "These are articles the user has saved. Use `read_article` to read full content, "
-    "`grep_articles` to search across them.\n"
+    "These are articles the user has saved. Each entry has a title and a summary describing what's "
+    "in it. Pick the articles whose summaries match the question and read them with `read_article`. "
+    "Only fall back to `grep_articles` if no summary matches.\n"
     "{article_index}\n\n"
 
     "## Recent Changes\n{wiki_recent}\n\n"
@@ -51,18 +52,20 @@ SYSTEM_PROMPT_TEMPLATE = (
     "You decide what to do based on the user's message. There is no separate mode.\n\n"
 
     "**When the user asks a question:**\n"
-    "1. Start with `search_knowledge` — it searches ALL concepts and articles at once, "
-    "ranked by relevance. This is your best first move.\n"
-    "2. Read the top results with `read_wiki_page` or `read_article` for full content.\n"
-    "3. If initial results are sparse, try different search terms:\n"
-    "   - Synonyms (e.g., 'LLM' vs 'language model')\n"
-    "   - Broader terms (e.g., 'agent' instead of 'subagent')\n"
-    "   - Related concepts from the wiki index\n"
-    "4. Follow [[backlinks]] — if a concept mentions [[Related Topic]], read that too.\n"
-    "5. Answer from what you find. **Cite ALL relevant sources**, not just the first match.\n"
-    "6. If multiple concepts or articles are relevant, synthesize across all of them.\n"
-    "7. **At the very end of your response**, always add a brief 'Sources:' line listing "
-    "the article titles and/or concept pages you read to answer. Example:\n"
+    "1. Look at the **Wiki Index** and **Saved Articles** above. Each entry has a title and a "
+    "summary describing what's in it. Pick every page whose title or summary matches what the "
+    "user is asking about — don't stop at the first hit.\n"
+    "2. Read each picked page with `read_wiki_page` (for concepts) or `read_article` (for "
+    "articles). Issue these reads in parallel when possible.\n"
+    "3. Follow [[backlinks]] inside the pages you read — if a concept references [[Related Topic]] "
+    "and that topic is in the index, read it too.\n"
+    "4. Synthesize the answer from everything you read. **Cite ALL sources you used**, not just "
+    "the first one.\n"
+    "5. **Fallback only if the indices don't contain anything matching the user's wording**: use "
+    "`search_knowledge` to do a keyword scan across the full content of every page. This catches "
+    "cases where the user's terminology doesn't match the curated titles/summaries.\n"
+    "6. **At the very end of your response**, always add a brief 'Sources:' line listing the "
+    "article titles and/or concept pages you read. Example:\n"
     "   Sources: *Prompt Caching Is Everything*, *LLM Optimization*\n\n"
 
     "**When the user shares knowledge or a URL:**\n"
@@ -138,7 +141,7 @@ TOOLS = [
             },
             {
                 "name": "grep_wiki",
-                "description": "Search across wiki concept pages for a pattern. Uses OR logic — multi-word queries find pages matching ANY term. Good for targeted concept searches.",
+                "description": "FALLBACK keyword search across wiki concept pages only. Use only when the Wiki Index in the system prompt doesn't surface a matching concept. Prefer picking from the Wiki Index directly.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -150,7 +153,7 @@ TOOLS = [
             },
             {
                 "name": "search_knowledge",
-                "description": "Search across ALL knowledge — concepts AND articles — in one call. Results are ranked by relevance (how many query terms match, with bonus for title matches). Best first tool to use when answering questions.",
+                "description": "FALLBACK keyword search across all wiki pages and articles. Only use this when the Wiki Index and Saved Articles in the system prompt don't have any titles or summaries matching the user's question. Prefer reading directly from the indices when possible — they already describe every page.",
                 "parameters": {
                     "type": "object",
                     "properties": {
