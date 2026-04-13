@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { UserProvider } from "../lib/user";
 import { ThemeProvider } from "../lib/theme";
+import { BackendProvider } from "../lib/backend";
 import { Sidebar } from "../components/sidebar";
 
 const geistSans = Geist({
@@ -31,6 +32,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <ThemeProvider>
+          <BackendProvider>
           <UserProvider>
             <div className="flex h-screen overflow-hidden">
               <Sidebar />
@@ -39,6 +41,7 @@ export default function RootLayout({
               </div>
             </div>
           </UserProvider>
+          </BackendProvider>
         </ThemeProvider>
       </body>
     </html>

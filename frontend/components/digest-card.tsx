@@ -3,14 +3,16 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { getDigest, completeGoal, type DigestData } from "../lib/api";
+import { useBackend } from "../lib/backend";
 
 export function DigestCard({ userId }: { userId: string }) {
+  const { backend } = useBackend();
   const [digest, setDigest] = useState<DigestData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     getDigest(userId).then(setDigest).catch(console.error).finally(() => setLoading(false));
-  }, [userId]);
+  }, [userId, backend]);
 
   if (loading || !digest) return null;
 

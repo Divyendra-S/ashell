@@ -90,13 +90,17 @@ export interface DigestData {
   kb_suggestions: string[];
 }
 
-const API = "/api";
+let _apiBase = "http://localhost:8000/api";
+
+export function setApiBase(base: string) {
+  _apiBase = base;
+}
 
 async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const maxRetries = init?.method === "POST" ? 0 : 2;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const res = await fetch(`${API}${path}`, init);
+      const res = await fetch(`${_apiBase}${path}`, init);
       if (res.ok) return res.json();
       if (res.status < 500 || attempt === maxRetries) {
         throw new Error(`API error: ${res.status}`);
@@ -142,12 +146,7 @@ export function streamMessage(
   if (skill) body.skill = skill;
   if (history?.length) body.history = history;
 
-  // Bypass Next.js proxy for SSE — proxy buffers the response
-  const isLocal = typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-  const streamUrl = isLocal
-    ? "http://localhost:8000/api/chat/stream"
-    : `${API}/chat/stream`;
+  const streamUrl = `${_apiBase}/chat/stream`;
 
   fetch(streamUrl, {
     method: "POST",

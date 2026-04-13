@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { streamMessage, getSkills, type SkillInfo, type ToolStep } from "../lib/api";
 import { useUser } from "../lib/user";
+import { useBackend } from "../lib/backend";
 import { DigestCard } from "../components/digest-card";
 import { MarkdownContent } from "../components/markdown-content";
 import { ToolSteps } from "../components/tool-steps";
@@ -48,6 +49,7 @@ function getGreeting(): string {
 
 export default function Home() {
   const { userId } = useUser();
+  const { backend } = useBackend();
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -66,7 +68,7 @@ export default function Home() {
 
   useEffect(() => {
     getSkills().then(setSkills).catch(() => {});
-  }, []);
+  }, [backend]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

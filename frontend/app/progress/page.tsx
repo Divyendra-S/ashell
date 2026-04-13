@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useUser } from "../../lib/user";
+import { useBackend } from "../../lib/backend";
 import { getTimeline, getStreak, type TimelineEntry, type StreakData } from "../../lib/api";
 import { ActivityHeatmap } from "../../components/activity-heatmap";
 import { TimelineFeed } from "../../components/timeline-feed";
@@ -17,6 +18,7 @@ const fadeUp = (delay: number) => ({
 
 export default function ProgressPage() {
   const { userId } = useUser();
+  const { backend } = useBackend();
   const router = useRouter();
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [streak, setStreak] = useState<StreakData | null>(null);
@@ -28,7 +30,7 @@ export default function ProgressPage() {
       .then(([tl, st]) => { setTimeline(tl); setStreak(st); })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [userId, router]);
+  }, [userId, backend, router]);
 
   const handleGoalCompleted = useCallback((goalId: number) => {
     setTimeline((prev) =>

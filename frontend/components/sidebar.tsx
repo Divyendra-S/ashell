@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useUser } from "../lib/user";
 import { useTheme } from "../lib/theme";
+import { useBackend } from "../lib/backend";
 import { useState, useEffect } from "react";
 import { getStats, getStreak, type Stats, type StreakData } from "../lib/api";
 
@@ -88,6 +89,7 @@ export function Sidebar() {
   const router = useRouter();
   const { userId, logout } = useUser();
   const { theme, toggle: toggleTheme } = useTheme();
+  const { backend, toggle: toggleBackend } = useBackend();
   const [collapsed, setCollapsed] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [streak, setStreak] = useState<StreakData | null>(null);
@@ -96,7 +98,7 @@ export function Sidebar() {
     if (!userId) return;
     getStats(userId).then(setStats).catch(() => {});
     getStreak(userId).then(setStreak).catch(() => {});
-  }, [userId]);
+  }, [userId, backend]);
 
   if (!userId || pathname === "/login") return null;
 
@@ -110,7 +112,7 @@ export function Sidebar() {
       <div className="flex h-12 items-center justify-between px-3">
         {!collapsed && (
           <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-text-tertiary">
-            Kuro
+            {backend === "kuro" ? "Kuro" : "Nexus"}
           </span>
         )}
         <button
@@ -209,6 +211,38 @@ export function Sidebar() {
 
       {/* Spacer */}
       <div className="flex-1" />
+
+      {/* Backend toggle */}
+      <div className="px-2 pb-1">
+        <button
+          onClick={toggleBackend}
+          className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-text-tertiary transition-all duration-200 hover:bg-surface-1/50 hover:text-text-secondary ${collapsed ? "justify-center" : ""}`}
+          title={`Switch to ${backend === "kuro" ? "Nexus" : "Kuro"}`}
+        >
+          <span className="shrink-0">
+            {backend === "kuro" ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <ellipse cx="12" cy="5" rx="9" ry="3" />
+                <path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" />
+                <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <circle cx="19" cy="5" r="2" />
+                <circle cx="5" cy="5" r="2" />
+                <circle cx="19" cy="19" r="2" />
+                <circle cx="5" cy="19" r="2" />
+                <line x1="14.5" y1="10" x2="17.5" y2="6.5" />
+                <line x1="9.5" y1="10" x2="6.5" y2="6.5" />
+                <line x1="14.5" y1="14" x2="17.5" y2="17.5" />
+                <line x1="9.5" y1="14" x2="6.5" y2="17.5" />
+              </svg>
+            )}
+          </span>
+          {!collapsed && <span className="font-light">{backend === "kuro" ? "Kuro" : "Nexus"}</span>}
+        </button>
+      </div>
 
       {/* Theme toggle */}
       <div className="px-2 pb-1">

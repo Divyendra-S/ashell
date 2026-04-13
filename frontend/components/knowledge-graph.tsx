@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTheme } from "../lib/theme";
+import { useBackend } from "../lib/backend";
 import type { GraphData, ConceptDetail, Stats } from "../lib/api";
 import { getConceptDetail, createNote } from "../lib/api";
 
@@ -184,6 +185,7 @@ export function KnowledgeGraph({
   stats: Stats | null;
 }) {
   const { theme } = useTheme();
+  const { backend } = useBackend();
   const isDark = theme === "dark";
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
@@ -233,7 +235,7 @@ export function KnowledgeGraph({
         setPanelLoading(false);
       }
     },
-    [userId]
+    [userId, backend]
   );
 
   const nameToSlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useUser } from "../../lib/user";
+import { useBackend } from "../../lib/backend";
 import {
   getGraph,
   getStats,
@@ -26,6 +27,7 @@ const TABS: { key: Tab; label: string }[] = [
 
 export default function DashboardPage() {
   const { userId } = useUser();
+  const { backend } = useBackend();
   const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
   const [growth, setGrowth] = useState<GrowthDay[]>([]);
@@ -47,7 +49,7 @@ export default function DashboardPage() {
       console.error("Articles fetch failed:", err);
       setArticleError(true);
     });
-  }, [userId, router]);
+  }, [userId, backend, router]);
 
   if (!userId) return null;
 
